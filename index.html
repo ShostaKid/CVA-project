@@ -599,6 +599,193 @@ function vienNet(pts, y){
   return g;
 }
 
+
+/* ══════════════════════════════════════════════════════════════════
+   NẮN DỮ LIỆU TRƯỚC KHI DỰNG
+   OSM cắt đường và tường rào thành nhiều "way" rời rạc. Hai way kề nhau
+   lệch nhau từ vài chục phân tới gần năm mét, nên dựng thẳng ra thì
+   đường đứt khúc còn tường thì gãy — rõ nhất là hai bên cổng chính.
+   Ba việc dưới đây làm sạch dữ liệu ngay trong bộ nhớ:
+     A. vuốt cho tuyến đường bớt răng cưa;
+     B. hàn đầu mút các tuyến về chung một nút, rồi bắt cả nút chữ T;
+     C. dựng lại đoạn tường hai bên MỖI cổng cho khớp đúng trụ cổng,
+        đồng thời xoay lại cổng cho vuông góc với tường.
+   ══════════════════════════════════════════════════════════════════ */
+(function nanDuLieu(){
+
+  /* ── A. vuốt răng cưa ────────────────────────────────────────────
+     Trung bình hoá mỗi đỉnh trong với hai đỉnh kề (trọng số 0,6/0,2/0,2).
+     Hai đầu mút giữ nguyên để bước hàn phía dưới còn khớp được. */
+  var duong = D.duong.filter(function(r){ return r.diem && r.diem.length >= 2; });
+  duong.forEach(function(r){
+    var p = r.diem;
+    if(p.length < 5) return;
+    var q = p.map(function(v){ return [v[0], v[1]]; });
+    for(var i=1; i<p.length-1; i++){
+      q[i][0] = p[i][0]*0.6 + (p[i-1][0] + p[i+1][0])*0.2;
+      q[i][1] = p[i][1]*0.6 + (p[i-1][1] + p[i+1][1])*0.2;
+    }
+    r.diem = q;
+  });
+
+  /* ── B1. hàn đầu mút ────────────────────────────────────────────
+     Gom mọi đầu mút nằm trong bán kính TOL về một nút chung. Không gom
+     hai đầu của CÙNG một tuyến, kẻo tuyến ngắn co lại thành một điểm.
+     Gom kiểu tham lam có tật: tâm cụm xê dịch dần theo từng đầu mút vừa
+     nhận, nên đầu mút đến sau — dù chỉ cách đầu mút đến trước vài phân —
+     lại rơi ra ngoài bán kính và tự lập cụm mới. Vì thế phải gom ĐI GOM
+     LẠI trên vị trí đã nắn, tới khi không còn gì dịch chuyển nữa. */
+  var TOL = 5.0;
+  var mut = [];
+  function viTri(m){ return m.cuoi ? m.r.diem.length-1 : 0; }
+  duong.forEach(function(r){ mut.push({r:r, cuoi:false}); mut.push({r:r, cuoi:true}); });
+
+  for(var vong=0; vong<6; vong++){
+    var cum = [];
+    mut.forEach(function(m){
+      var p = m.r.diem[viTri(m)], tim = null;
+      for(var k=0; k<cum.length; k++){
+        var c = cum[k];
+        if(Math.hypot(c.x-p[0], c.z-p[1]) >= TOL) continue;
+        var trung = false;
+        for(var j=0; j<c.ds.length; j++) if(c.ds[j].r === m.r) trung = true;
+        if(trung) continue;
+        tim = c; break;
+      }
+      if(!tim){ tim = {x:p[0], z:p[1], ds:[]}; cum.push(tim); }
+      tim.ds.push(m);
+      var sx=0, sz=0;
+      tim.ds.forEach(function(q){ var v=q.r.diem[viTri(q)]; sx+=v[0]; sz+=v[1]; });
+      tim.x = sx/tim.ds.length; tim.z = sz/tim.ds.length;
+    });
+    var doi = false;
+    cum.forEach(function(c){
+      if(c.ds.length < 2) return;
+      c.ds.forEach(function(m){ m.han = true; });
+      c.ds.forEach(function(m){
+        var v = m.r.diem[viTri(m)];
+        if(Math.abs(v[0]-c.x) > 1e-6 || Math.abs(v[1]-c.z) > 1e-6) doi = true;
+        m.r.diem[viTri(m)] = [c.x, c.z];
+      });
+    });
+    if(!doi) break;
+  }
+
+  /* ── B2. nút chữ T ──────────────────────────────────────────────
+     Đầu mút rơi vào GIỮA một tuyến khác thì kéo về bám đúng lên tuyến
+     ấy, đồng thời chèn một đỉnh vào tuyến kia cho hai bên dùng chung
+     một điểm. Nếu không, ngã ba nào cũng hở một khe hình tam giác.
+     CHỈ xét đầu mút còn bơ vơ. Một đầu mút vừa hàn ở B1 mà đem bắt tiếp
+     vào tuyến khác thì nó bị kéo đi tới bốn mét, thế là mối vừa hàn xong
+     lại toác ra — đúng lỗi làm hở mười một ngã ba quanh trường ở bản thử
+     trước, trong đó có cả ngã ba ngay trước cổng chính. */
+  var TOL_T = 4.0;
+  mut.forEach(function(m){
+    if(m.han) return;
+    var p = m.r.diem[viTri(m)];
+    var tot = null, dNhat = TOL_T;
+    duong.forEach(function(s){
+      if(s === m.r) return;
+      for(var i=0; i<s.diem.length-1; i++){
+        var a=s.diem[i], b=s.diem[i+1];
+        var dx=b[0]-a[0], dz=b[1]-a[1], L2=dx*dx+dz*dz;
+        if(L2 < 1e-6) continue;
+        var t = ((p[0]-a[0])*dx + (p[1]-a[1])*dz)/L2;
+        if(t <= 0.03 || t >= 0.97) continue;
+        var qx=a[0]+dx*t, qz=a[1]+dz*t;
+        var d = Math.hypot(p[0]-qx, p[1]-qz);
+        if(d < dNhat){ dNhat = d; tot = {s:s, i:i, q:[qx,qz]}; }
+      }
+    });
+    if(!tot || dNhat < 0.02) return;
+    m.r.diem[viTri(m)] = [tot.q[0], tot.q[1]];
+    tot.s.diem.splice(tot.i+1, 0, [tot.q[0], tot.q[1]]);
+    m.han = true;
+  });
+
+  /* ── B3. bắc nhịp nối ───────────────────────────────────────────
+     Vẫn còn dăm cặp đầu mút cách nhau năm sáu mét, quá tầm hàn của B1.
+     Hàn ép thì phải kéo nguyên một đầu tuyến đi ngần ấy mét, cong vẹo
+     cả con đường. Rẻ hơn nhiều là bắc một NHỊP NGẮN nối hai đầu lại:
+     hình tuyến giữ nguyên như dữ liệu gốc, mà khe hở thì biến mất.
+     Chỉ bắc khi hai mép đường thật sự chưa chồng lên nhau — hai con
+     đường mười lăm mét bề ngang chụm đầu cách nhau một mét thì mặt
+     đường đã phủ kín nhau rồi, bắc thêm chỉ tổ thừa. */
+  var TOL_C = 7.5;
+  for(var iC=0; iC<mut.length; iC++){
+    var m1 = mut[iC];
+    if(m1.han) continue;
+    var p1 = m1.r.diem[viTri(m1)];
+    var banC = null, dC = TOL_C;
+    for(var jC=0; jC<mut.length; jC++){
+      var m2 = mut[jC];
+      if(m2.r === m1.r || m2.han) continue;
+      var p2 = m2.r.diem[viTri(m2)];
+      var d = Math.hypot(p1[0]-p2[0], p1[1]-p2[1]);
+      if(d < 0.001 || d >= dC) continue;
+      if(d <= (m1.r.rong + m2.r.rong)/2) continue;
+      dC = d; banC = m2;
+    }
+    if(!banC) continue;
+    var q = banC.r.diem[viTri(banC)];
+    if(m1.cuoi) m1.r.diem.push([q[0], q[1]]);
+    else        m1.r.diem.unshift([q[0], q[1]]);
+    m1.han = true; banC.han = true;
+  }
+
+  /* ── C. tường bao và cổng ───────────────────────────────────────
+     Dữ liệu gốc để sẵn mấy đoạn tường cụt hai bên cổng, nhưng chúng
+     không chạm được vào cung tường chính, cũng chẳng chạm vào trụ cổng
+     — cổng chính hở tới hơn năm mét. Nay bỏ hết các đoạn cụt ấy rồi
+     dựng lại theo đúng khe hở thật giữa hai cung tường:
+       · lấy hai đầu tường gần cổng nhất, ở hai cung khác nhau;
+       · hướng cổng đặt VUÔNG GÓC với đoạn nối hai đầu ấy;
+       · cổng lùi vào trong đúng khoảng lùi cũ, hai đoạn tường mới
+         xoè từ hai đầu tường vào đúng tâm hai trụ cổng.
+     Nhờ vậy tường — tường cụt — trụ cổng nối liền một mạch. */
+  if(D.tuongTruong && D.cong && D.cong.length){
+    var cungChinh = D.tuongTruong.filter(function(c){ return c.length > 2; });
+
+    var C=[0,0], nC=0;
+    (D.ranhTruong || []).forEach(function(p){ C[0]+=p[0]; C[1]+=p[1]; nC++; });
+    if(!nC) cungChinh.forEach(function(c){
+      c.forEach(function(p){ C[0]+=p[0]; C[1]+=p[1]; nC++; }); });
+    if(nC){ C[0]/=nC; C[1]/=nC; }
+
+    var tuongMoi = cungChinh.slice();
+    D.cong.forEach(function(g){
+      var ds = [];
+      cungChinh.forEach(function(c, k){
+        [c[0], c[c.length-1]].forEach(function(p){
+          ds.push({p:p, k:k, d:Math.hypot(p[0]-g.x, p[1]-g.z)});
+        });
+      });
+      ds.sort(function(a,b){ return a.d - b.d; });
+      var e1 = ds[0], e2 = null;
+      for(var i=1; i<ds.length; i++) if(ds[i].k !== e1.k){ e2 = ds[i]; break; }
+      if(!e1 || !e2 || e2.d > 26) return;
+
+      var ux = e2.p[0]-e1.p[0], uz = e2.p[1]-e1.p[1];
+      var khe = Math.hypot(ux, uz) || 1; ux/=khe; uz/=khe;
+      var mx = (e1.p[0]+e2.p[0])/2, mz = (e1.p[1]+e2.p[1])/2;
+      var nx = -uz, nz = ux;
+      if((C[0]-mx)*nx + (C[1]-mz)*nz < 0){ nx = -nx; nz = -nz; }
+
+      var lui = (g.x-mx)*nx + (g.z-mz)*nz;
+      lui = Math.max(2.6, Math.min(6.0, lui));
+      var rong = Math.min(g.rong, Math.max(3.0, khe-1.6));
+
+      g.rong = rong;
+      g.x = mx + nx*lui;  g.z = mz + nz*lui;
+      g.tiep = [ux, uz];
+      g.phap = [nx, nz];
+
+      tuongMoi.push([[e1.p[0], e1.p[1]], [g.x - ux*rong/2, g.z - uz*rong/2]]);
+      tuongMoi.push([[e2.p[0], e2.p[1]], [g.x + ux*rong/2, g.z + uz*rong/2]]);
+    });
+    D.tuongTruong = tuongMoi;
+  }
+})();
 /* ── mặt nền khu vực ───────────────────────────────────────────────── */
 var M = D.mau;
 /* Thay mặt phẳng vô tận bằng ĐẾ SA BÀN có biên và bề dày. Nhìn từ góc
@@ -753,22 +940,6 @@ D.cong.forEach(function(g){
   nutCong.push({d:g, tam:new THREE.Vector3(g.x, caoTru + 3, g.z)});
 });
 
-/* Sân thể thao — VẼ TAY, OSM chỉ tô màu nên không xuất được dữ liệu. */
-var lopSan = new THREE.Group(); scene.add(lopSan);
-D.sanBong.forEach(function(sb){
-  var m0=phang(sb.diem, M.sanBong, 0.40);
-  scene.remove(m0); lopSan.add(m0);
-  var vong = sb.diem.concat([sb.diem[0]]);
-  lopSan.add(new THREE.Mesh(daiDuong(vong, 1.4, 0.52),
-    new THREE.MeshBasicMaterial({color:M.vienSan})));
-  var z0=sb.diem[0][1], z1=sb.diem[2][1], x0=sb.diem[0][0], x1=sb.diem[1][0];
-  for(var k=1;k<sb.oNgang;k++){
-    var zz = z0 + (z1-z0)*k/sb.oNgang;
-    lopSan.add(new THREE.Mesh(daiDuong([[x0,zz],[x1,zz]], 0.9, 0.52),
-      new THREE.MeshBasicMaterial({color:M.vienSan})));
-  }
-});
-
 /* ── đường: gờ viền sẫm dưới, mặt đường trắng trên ─────────────────── */
 var lopDuong = new THREE.Group(); scene.add(lopDuong);
 /* Dia tron dat tai moi dinh duong. Du lieu OSM chia duong thanh nhieu
@@ -776,7 +947,12 @@ var lopDuong = new THREE.Group(); scene.add(lopDuong);
    ra "duong dut net". Dat mot dia ban kinh = nua be rong tai moi dinh
    se vá kín mọi khe, kể cả chỗ hai way khác nhau gặp nhau. */
 function diaTron(x, z, bk, y){
-  var v=[], nr=[], seg=10;
+  /* Số cạnh chia theo BÁN KÍNH, đừng cào bằng mười cạnh cho mọi cỡ đĩa.
+     Đường Thanh Niên rộng mười lăm mét: đĩa vá bán kính bảy mét rưỡi mà
+     chỉ mười cạnh thì mỗi cạnh dài gần năm mét — ngã tư nào cũng hoá ra
+     một hình mười cạnh nhìn thấy rõ mồn một. Lối đi bộ rộng một mét thì
+     ngược lại, mười cạnh là quá thừa. */
+  var v=[], nr=[], seg=Math.max(8, Math.min(28, Math.round(bk*5)));
   for(var i=0;i<seg;i++){
     var a1=Math.PI*2*i/seg, a2=Math.PI*2*(i+1)/seg;
     v.push(x, y, z);                       nr.push(0,1,0);
@@ -810,6 +986,231 @@ function themDuong(mau, y, congThem){
 }
 themDuong(M.vienDuong, 0.14, 2.2);   // gờ viền
 themDuong(M.duong,     0.26, 0);     // mặt đường
+
+/* ══ SÂN THỂ THAO ══════════════════════════════════════════════════
+   OSM chỉ tô màu khu này, không xuất được dữ liệu, nên vạch sân vẽ tay.
+   Ba khối chữ nhật phía tây nằm sát nhau: trước đây mỗi khối viền trắng
+   một vòng nên đọc ra "ba cái hộp", chứ không ra sân bóng. Nay gộp cả ba
+   thành MỘT sân bóng đá, kẻ đủ bộ vạch theo tỉ lệ FIFA thu nhỏ vừa khổ
+   sân: biên dọc, biên ngang, đường giữa, vòng tròn giữa, khu 16m50,
+   khu 5m50, chấm phạt đền, cung phạt đền, cung phạt góc — thêm khung
+   thành và cờ góc dựng nổi để nhìn nghiêng vẫn ra sân bóng.
+   Khối thứ tư tách rời nên kẻ thành sân bóng rổ.
+   ══════════════════════════════════════════════════════════════════ */
+var lopSan = new THREE.Group(); scene.add(lopSan);
+(function dungSan(){
+  var VACH   = M.vienSan;
+  var CO     = M.sanBong;
+  var CO_SAM = 0x6FB78C;   // dải cỏ xén sẫm, xen kẽ cho mặt sân đỡ phẳng lì
+  var SAN_RO = 0xC08457;   // mặt sân bóng rổ, màu bê tông nhuộm
+  var TRANG  = 0xF7F7F2;   // khung thành
+  var Y_NEN = 0.40, Y_SOC = 0.45, Y_VACH = 0.56, R_VACH = 0.30;
+
+  function nen(x0,x1,z0,z1,mau,y){
+    var m = phang([[x0,z0],[x1,z0],[x1,z1],[x0,z1]], mau, y);
+    scene.remove(m); lopSan.add(m); return m;
+  }
+  function vach(pts, rong, mau){
+    lopSan.add(new THREE.Mesh(daiDuong(pts, rong||R_VACH, Y_VACH),
+      new THREE.MeshBasicMaterial({color:mau||VACH})));
+  }
+  function cham(cx,cz,bk){
+    lopSan.add(new THREE.Mesh(diaTron(cx,cz,bk||0.30,Y_VACH),
+      new THREE.MeshBasicMaterial({color:VACH})));
+  }
+  function hop(x,y,z, dx,dy,dz, mau){
+    var m=new THREE.Mesh(new THREE.BoxGeometry(dx,dy,dz),
+      new THREE.MeshLambertMaterial({color:mau}));
+    m.position.set(x,y,z); m.castShadow=true; lopSan.add(m); return m;
+  }
+
+  /* ── gom các khối chữ nhật nằm liền nhau thành một sân ── */
+  var o = D.sanBong.map(function(sb){
+    var xs=sb.diem.map(function(p){return p[0];}),
+        zs=sb.diem.map(function(p){return p[1];});
+    return {x0:Math.min.apply(null,xs), x1:Math.max.apply(null,xs),
+            z0:Math.min.apply(null,zs), z1:Math.max.apply(null,zs), sb:sb, n:-1};
+  });
+  var dem=0;
+  o.forEach(function(a){ if(a.n<0) a.n=dem++; });
+  for(var lan=0; lan<o.length; lan++){
+    o.forEach(function(a){
+      o.forEach(function(b){
+        if(a===b || a.n===b.n) return;
+        var kx = Math.min(a.x1,b.x1) - Math.max(a.x0,b.x0);
+        var kz = Math.min(a.z1,b.z1) - Math.max(a.z0,b.z0);
+        if(!((kx > 2 && kz > -1.8) || (kz > 2 && kx > -1.8))) return;
+        var cu = Math.max(a.n, b.n), moi = Math.min(a.n, b.n);
+        o.forEach(function(c){ if(c.n===cu) c.n=moi; });
+      });
+    });
+  }
+  var bang = {};
+  o.forEach(function(a){ (bang[a.n] = bang[a.n] || []).push(a); });
+  var ds = Object.keys(bang).map(function(k){ return bang[k]; });
+  ds.sort(function(a,b){ return b.length - a.length; });
+  if(!ds.length) return;
+
+  /* ── mặt sân: giữ nguyên từng khối như dữ liệu gốc ── */
+  ds.forEach(function(gr, gi){
+    gr.forEach(function(a){
+      nen(a.x0, a.x1, a.z0, a.z1, gi===0 ? CO : SAN_RO, Y_NEN);
+    });
+  });
+
+  function baoNhom(gr){
+    var b={x0:1e9,x1:-1e9,z0:1e9,z1:-1e9};
+    gr.forEach(function(a){
+      b.x0=Math.min(b.x0,a.x0); b.x1=Math.max(b.x1,a.x1);
+      b.z0=Math.min(b.z0,a.z0); b.z1=Math.max(b.z1,a.z1);
+    });
+    return b;
+  }
+
+  /* ══ 1. SÂN BÓNG ĐÁ ═════════════════════════════════════════════
+     Kẻ trong hệ toạ độ (u dọc sân, v ngang sân) rồi mới đổi về (x,z),
+     nhờ vậy công thức không phải viết hai lần cho hai chiều đặt sân. */
+  (function sanBongDa(){
+    var b = baoNhom(ds[0]);
+    var doc = (b.z1-b.z0) >= (b.x1-b.x0);
+    var u0 = doc ? b.z0 : b.x0, u1 = doc ? b.z1 : b.x1;
+    var v0 = doc ? b.x0 : b.z0, v1 = doc ? b.x1 : b.z1;
+    var LE = 1.6;                              // lề chạy đà quanh sân
+    u0 += LE; u1 -= LE; v0 += LE; v1 -= LE;
+    var L = u1-u0, W = v1-v0;
+    if(L < 24 || W < 16) return;
+    var uc = (u0+u1)/2, vc = (v0+v1)/2;
+    var k = W/68;                              // thu nhỏ theo bề ngang sân
+
+    function P(u,v){ return doc ? [v,u] : [u,v]; }
+    function duong(list, rong){
+      vach(list.map(function(q){ return P(q[0],q[1]); }), rong);
+    }
+    function cungUV(cu,cv,bk,a0,a1,rong){
+      var p=[], seg=Math.max(6, Math.round(Math.abs(a1-a0)/0.18));
+      for(var i=0;i<=seg;i++){
+        var a=a0+(a1-a0)*i/seg;
+        p.push(P(cu+Math.cos(a)*bk, cv+Math.sin(a)*bk));
+      }
+      vach(p, rong);
+    }
+    function chamUV(cu,cv,bk){ var q=P(cu,cv); cham(q[0],q[1],bk); }
+
+    /* dải cỏ xén xen kẽ, cắt ngang sân */
+    var soSoc = 10, buoc = (u1-u0)/soSoc;
+    for(var i=0;i<soSoc;i+=2){
+      var a=u0+buoc*i, c=Math.min(u1, a+buoc);
+      var q1=P(a,v0), q2=P(c,v1);
+      nen(Math.min(q1[0],q2[0]), Math.max(q1[0],q2[0]),
+          Math.min(q1[1],q2[1]), Math.max(q1[1],q2[1]), CO_SAM, Y_SOC);
+    }
+
+    duong([[u0,v0],[u1,v0],[u1,v1],[u0,v1],[u0,v0]]);   // biên sân
+    duong([[uc,v0],[uc,v1]]);                            // đường giữa
+    cungUV(uc, vc, 9.15*k, 0, Math.PI*2);                // vòng tròn giữa
+    chamUV(uc, vc, 0.34);
+
+    var sauP = 16.5*k, rongP = 40.32*k;
+    var sauG = 5.5*k,  rongG = 18.32*k;
+    var chamP = 11*k,  bkVong = 9.15*k;
+    var rongKT = 7.32*k, caoKT = 2.44*k;
+
+    [[u0, 1], [u1, -1]].forEach(function(e){
+      var ub = e[0], s = e[1];
+      duong([[ub, vc-rongP/2],[ub+s*sauP, vc-rongP/2],
+             [ub+s*sauP, vc+rongP/2],[ub, vc+rongP/2]]);
+      duong([[ub, vc-rongG/2],[ub+s*sauG, vc-rongG/2],
+             [ub+s*sauG, vc+rongG/2],[ub, vc+rongG/2]]);
+      chamUV(ub+s*chamP, vc, 0.32);
+      /* cung phạt đền: chỉ phần vòng tròn nhô ra NGOÀI khu 16m50 */
+      var xa = sauP - chamP;
+      if(xa < bkVong){
+        var gc = Math.acos(xa/bkVong);
+        var g0 = s>0 ? -gc : Math.PI-gc;
+        var g1 = s>0 ?  gc : Math.PI+gc;
+        cungUV(ub+s*chamP, vc, bkVong, g0, g1);
+      }
+      /* bốn cung phạt góc */
+      [[v0,1],[v1,-1]].forEach(function(f){
+        var vb=f[0], sv=f[1];
+        var a0 = s>0 ? 0 : Math.PI;
+        var a1 = a0 + (s*sv>0 ? Math.PI/2 : -Math.PI/2);
+        cungUV(ub, vb, 1.2, a0, a1, 0.24);
+      });
+
+      /* khung thành: hai cột, xà ngang, khối lưới mờ xiên ra sau */
+      [-1,1].forEach(function(sg){
+        var q = P(ub, vc + sg*rongKT/2);
+        hop(q[0], caoKT/2, q[1], 0.17, caoKT, 0.17, TRANG);
+      });
+      var qc = P(ub, vc);
+      hop(qc[0], caoKT+0.08, qc[1],
+          doc ? rongKT+0.17 : 0.17, 0.17, doc ? 0.17 : rongKT+0.17, TRANG);
+      var sau = 1.8, qs = P(ub - s*sau*0.5, vc);
+      var luoi = new THREE.Mesh(
+        new THREE.BoxGeometry(doc ? rongKT : sau, caoKT*0.9, doc ? sau : rongKT),
+        new THREE.MeshLambertMaterial({color:TRANG, transparent:true,
+          opacity:0.30, side:THREE.DoubleSide}));
+      luoi.position.set(qs[0], caoKT*0.45, qs[1]);
+      lopSan.add(luoi);
+    });
+
+    /* bốn cờ góc */
+    [[u0,v0],[u0,v1],[u1,v0],[u1,v1]].forEach(function(q){
+      var p=P(q[0],q[1]);
+      hop(p[0], 0.75, p[1], 0.09, 1.5, 0.09, 0xF2EEE0);
+      hop(p[0]+0.24, 1.30, p[1], 0.46, 0.30, 0.05, 0xC0392B);
+    });
+  })();
+
+  /* ══ 2. SÂN BÓNG RỔ trên các khối tách rời ═══════════════════ */
+  for(var gi=1; gi<ds.length; gi++){
+    (function(gr){
+      var b = baoNhom(gr);
+      var doc = (b.z1-b.z0) >= (b.x1-b.x0);
+      var u0 = doc ? b.z0 : b.x0, u1 = doc ? b.z1 : b.x1;
+      var v0 = doc ? b.x0 : b.z0, v1 = doc ? b.x1 : b.z1;
+      var L = Math.min(28, (u1-u0) - 2.6), W = Math.min(15, (v1-v0) - 1.6);
+      if(L < 14 || W < 8) return;
+      var uc=(u0+u1)/2, vc=(v0+v1)/2;
+      u0 = uc-L/2; u1 = uc+L/2; v0 = vc-W/2; v1 = vc+W/2;
+      var k2 = W/15;
+
+      function P(u,v){ return doc ? [v,u] : [u,v]; }
+      function duong(list){
+        vach(list.map(function(q){ return P(q[0],q[1]); }), 0.22);
+      }
+      function cungUV(cu,cv,bk,a0,a1){
+        var p=[], seg=Math.max(6, Math.round(Math.abs(a1-a0)/0.18));
+        for(var i=0;i<=seg;i++){
+          var a=a0+(a1-a0)*i/seg;
+          p.push(P(cu+Math.cos(a)*bk, cv+Math.sin(a)*bk));
+        }
+        vach(p, 0.22);
+      }
+
+      duong([[u0,v0],[u1,v0],[u1,v1],[u0,v1],[u0,v0]]);
+      duong([[uc,v0],[uc,v1]]);
+      cungUV(uc, vc, 1.8*k2, 0, Math.PI*2);
+
+      [[u0,1],[u1,-1]].forEach(function(e){
+        var ub=e[0], s=e[1];
+        var sauL=5.8*k2, rongL=4.9*k2, ro=1.575*k2, bk3=6.4*k2;
+        duong([[ub, vc-rongL/2],[ub+s*sauL, vc-rongL/2],
+               [ub+s*sauL, vc+rongL/2],[ub, vc+rongL/2]]);
+        cungUV(ub+s*sauL, vc, 1.8*k2, 0, Math.PI*2);
+        cungUV(ub + s*ro, vc, bk3,
+               s>0 ? -Math.PI/2 : Math.PI/2,
+               s>0 ?  Math.PI/2 : Math.PI*1.5);
+        /* trụ, bảng rổ, vành rổ */
+        var qt=P(ub - s*0.9, vc), qb=P(ub + s*0.30, vc), qr=P(ub + s*0.72, vc);
+        hop(qt[0], 1.55, qt[1], 0.22, 3.1, 0.22, 0x5C6660);
+        hop(qb[0], 2.95, qb[1], doc?1.8:0.10, 1.05, doc?0.10:1.8, 0xF2F2EC);
+        hop(qr[0], 2.62, qr[1], doc?0.9:0.08, 0.07, doc?0.08:0.9, 0xD9622B);
+      });
+    })(ds[gi]);
+  }
+})();
 
 /* ── nhà NGOÀI trường: thêm mái và cửa sổ cho đỡ thô ───────────────
    Nhà TRONG trường vẫn để khối trơn, sẽ dựng riêng ở bước sau. */
@@ -1088,7 +1489,7 @@ function hanhLang(b, pc){
 function matTienChiTiet(b){
   var mt=b.matTien||{}, mb=b.matBang, ph=offset(mb,-1);
   var buoc=mt.buocCot||3.4, rw=mt.rongCua||1.4, rh=mt.caoCua||2.2, vom=!!mt.vom;
-  var vT=[], nT=[], vO=[], nO=[], vC=[], nC=[], vG=[], nG=[];
+  var vT=[], nT=[], vO=[], nO=[], vC=[], nC=[], vG=[], nG=[], vGa=[], nGa=[];
 
   function quad(V,N, p1,p2,p3,p4, nx,ny,nz){
     [p1,p2,p3, p1,p3,p4].forEach(function(p){ V.push(p[0],p[1],p[2]); N.push(nx,ny,nz); });
@@ -1122,15 +1523,52 @@ function matTienChiTiet(b){
     var nx=(pa[0]+pb[0])/2-mx, nz=(pa[1]+pb[1])/2-mz;
     var nl=Math.hypot(nx,nz)||1; nx/=nl; nz/=nl;
     var dx=c[0]-a[0], dz=c[1]-a[1], L=Math.hypot(dx,dz)||1; dx/=L; dz/=L;
+    /* ── 4. ĐÁ GÓC GIẬT CẤP ─────────────────────────────────────
+       Hai bức tường gặp nhau ở một cạnh đứng sắc lẻm: nhìn nghiêng chỉ
+       thấy một đường gãy, đúng chỗ đáng ra phải là nét mạnh nhất của
+       toà nhà. Cả hai ảnh tư liệu đều xử lí góc theo lối đá giật cấp —
+       từng viên vôi trắng dài ngắn xen kẽ, viên của mặt tường này ăn
+       khớp vào chỗ hụt của mặt kia. Dựng bằng hộp nhỏ nên có gờ đổ bóng
+       thật, nhận ra hình khối cả khi lùi camera ra xa.
+       Đầu cạnh (dau=0) bắt đầu bằng viên DÀI, cuối cạnh (dau=1) bắt đầu
+       bằng viên NGẮN, nhờ vậy hai mặt của cùng một góc luôn so le. */
+    var caoDa=0.55, sauDa=0.135, daiDai=1.02, daiNgan=0.58;
+    var yDa0=1.52, yDa1=b.tang*b.caoTang-1.05;
+    var soDa=Math.floor((yDa1-yDa0)/caoDa);
+    if(L > 2.4 && soDa > 1){
+      for(var dau=0; dau<2; dau++){
+        for(var k=0;k<soDa;k++){
+          /* Viên DÀI chạy thẳng ra tới mép góc và trùm qua bề dày viên
+             của mặt bên; viên NGẮN thì thụt vào đúng bề dày ấy. Nhờ vậy
+             ở mỗi cao độ chỉ MỘT trong hai mặt lộ ra ngoài cùng, hai mặt
+             cài răng lược vào nhau đúng lối xây đá góc — chứ không phải
+             hai viên cùng đâm ra rồi cắm vào giữa nhau. */
+          var daiQ=((k+dau)%2===0), dQ = daiQ ? daiDai : daiNgan;
+          if(dQ > L*0.38) dQ = L*0.38;
+          var thut = daiQ ? 0 : sauDa + 0.02;
+          var tQ = dau===0 ? thut + dQ/2 : L - thut - dQ/2;
+          hop(vT,nT, a[0]+dx*tQ, yDa0+caoDa*(k+0.5), a[1]+dz*tQ,
+              dx,dz, nx,nz, dQ, caoDa*0.88, sauDa, 0.012);
+        }
+      }
+    }
+
     var so=Math.floor((L-1.6)/buoc);
     if(so<1) continue;
     var st=L/so;
 
-    /* ── 3. đầu xà gỗ dưới diềm mái, theo nhịp cột ── */
+    /* ── 3. đầu xà gỗ và con sơn đỡ diềm mái ────────────────────
+       Ảnh Nhà truyền thống: dưới diềm mái là một hàng con sơn gỗ sẫm,
+       dày, nhô hẳn ra khỏi tường. Chính hàng bóng đổ ấy mới tách được
+       mái khỏi tường khi nhìn từ xa — một thanh xà mảnh như bản trước
+       thì lùi ra mươi mét là mất. Mỗi con sơn nay dựng hai bậc: bậc
+       trên dài đỡ lấy diềm, bậc dưới ngắn và thụt vào. */
     for(var k=0;k<=so;k++){
       var t=Math.min(L-0.3, Math.max(0.3, st*k));
-      hop(vG,nG, a[0]+dx*t, b.tang*b.caoTang-0.55, a[1]+dz*t,
-          dx,dz, nx,nz, 0.22, 0.5, 0.55, 0.02);
+      hop(vG,nG, a[0]+dx*t, b.tang*b.caoTang-0.40, a[1]+dz*t,
+          dx,dz, nx,nz, 0.25, 0.30, 0.64, 0.02);
+      hop(vG,nG, a[0]+dx*t, b.tang*b.caoTang-0.78, a[1]+dz*t,
+          dx,dz, nx,nz, 0.21, 0.46, 0.36, 0.02);
     }
 
     for(var f=0; f<b.tang; f++){
@@ -1140,6 +1578,20 @@ function matTienChiTiet(b){
         var t=Math.min(L-0.25, Math.max(0.25, st*k));
         hop(vT,nT, a[0]+dx*t, yS+b.caoTang/2, a[1]+dz*t,
             dx,dz, nx,nz, 0.5, b.caoTang-0.34, 0.13, 0.01);
+      }
+      /* ── 5. ô gạch nung trang trí trên đầu mỗi trụ ──────────────
+         Ảnh dãy ba tầng: ngay dưới dải phào ngăn tầng, đầu mỗi trụ có
+         một ô gạch đỏ nhỏ lồng trong khung vôi trắng, lặp đều suốt mặt
+         tiền. Chi tiết bé nhưng chính nó phá cái đơn điệu của mảng
+         tường vàng, và là nét dễ nhận ra nhất của lối xây thuộc địa. */
+      if(f >= 1 && b.caoTang > 3.1){
+        var yG = yS + b.caoTang - 0.78;
+        for(var k=0;k<=so;k++){
+          var t=Math.min(L-0.25, Math.max(0.25, st*k));
+          var gx2=a[0]+dx*t, gz2=a[1]+dz*t;
+          tam(vT,nT, gx2,gz2, dx,dz, nx,nz, 0.62, yG-0.29, yG+0.29, 0.145);
+          tam(vGa,nGa, gx2,gz2, dx,dz, nx,nz, 0.38, yG-0.18, yG+0.18, 0.158);
+        }
       }
       /* ── 1. ô cửa ── */
       var treo=(f===0 && mt.hienLang)?0.95:1.2;
@@ -1200,7 +1652,8 @@ function matTienChiTiet(b){
     g.setAttribute('normal', new THREE.Float32BufferAttribute(N,3));
     return g;
   }
-  return { trang:lam(vT,nT), oCua:lam(vO,nO), chop:lam(vC,nC), go:lam(vG,nG) };
+  return { trang:lam(vT,nT), oCua:lam(vO,nO), chop:lam(vC,nC),
+           go:lam(vG,nG), gach:lam(vGa,nGa) };
 }
 
 var meshCVA = [];
@@ -1237,6 +1690,7 @@ D.nhaCVA.forEach(function(b){
   themCT(ct.oCua,  M.oCuaSau, true);
   themCT(ct.chop,  pc.cua,   true);
   themCT(ct.go,    M.xaGo,   false);
+  themCT(ct.gach,  M.muTuong, true);   // ô gạch nung trang trí
 
   /* dải phào ngang: chân tường, mỗi cao độ sàn, và dải lớn dưới chân mái */
   var day=[];
@@ -1372,29 +1826,196 @@ function hinhCay(p){
   return g;
 }
 
+
+/* ── TRỒNG THÊM CÂY TRONG KHUÔN VIÊN ───────────────────────────────
+   Đối chiếu ảnh vệ tinh: trong trường gần như kín tán. Một vành cổ thụ
+   chạy sát tường bao, hai hàng cây ôm lấy mọi lối đi, và khoảng sân
+   giữa các dãy nhà chỗ nào cũng có cây. Bản trước chỉ 78 cây nên nhìn
+   từ trên xuống khuôn viên trống trải hơn thực tế rất nhiều.
+   Cây thêm vào gieo bằng bộ sinh số giả ngẫu nhiên CỐ ĐỊNH, nên lần
+   dựng nào cũng ra đúng một kết quả — sa bàn không "nhảy" giữa hai lần
+   mở trang. Số cây có trần cứng: mỗi cây 12.400 tam giác, vượt trần thì
+   máy yếu tụt khung hình.                                            */
+(function trongThemCay(){
+  var ranh = D.ranhTruong;
+  if(!ranh || ranh.length < 3) return;
+
+  var TRAN = 240;            // trần tổng số cây 3D trong khuôn viên
+  var CACH_CAY = 5.4;        // hai gốc cây không được gần nhau hơn ngần này
+  var CACH_NHA = 4.2;        // chừa quanh chân tường nhà
+  var CACH_DUONG = 1.2;      // chừa thêm ngoài mép đường
+  var CACH_SAN = 4.0;        // chừa quanh sân thể thao
+
+  var _h = 20260826;
+  function ng(){ _h = (_h*1664525 + 1013904223) % 4294967296; return _h/4294967296; }
+
+  /* bao chữ nhật của khuôn viên, để quét lưới cho nhanh */
+  var bx0=1e9, bx1=-1e9, bz0=1e9, bz1=-1e9;
+  ranh.forEach(function(p){
+    bx0=Math.min(bx0,p[0]); bx1=Math.max(bx1,p[0]);
+    bz0=Math.min(bz0,p[1]); bz1=Math.max(bz1,p[1]);
+  });
+
+  /* vùng cấm: chân nhà, sân thể thao */
+  var cam = [];
+  (D.nhaCVA||[]).forEach(function(b){
+    if(b.matBang && b.matBang.length>2) cam.push(offset(b.matBang, -CACH_NHA));
+  });
+  (D.sanBong||[]).forEach(function(sb){
+    if(sb.diem && sb.diem.length>2) cam.push(offset(sb.diem, -CACH_SAN));
+  });
+
+  /* đường đi bên trong khuôn viên: giữ lòng đường thông thoáng */
+  var loi = [];
+  (D.duong||[]).forEach(function(r){
+    if(!r.diem || r.diem.length<2) return;
+    var co=false;
+    for(var i=0;i<r.diem.length;i++) if(trongDaGiac(r.diem[i], ranh)){ co=true; break; }
+    if(co) loi.push(r);
+  });
+
+  function xaDuong(x,z){
+    for(var i=0;i<loi.length;i++){
+      var r=loi[i], nua=r.rong/2 + CACH_DUONG;
+      for(var j=0;j<r.diem.length-1;j++){
+        var a=r.diem[j], b=r.diem[j+1];
+        var dx=b[0]-a[0], dz=b[1]-a[1], L2=dx*dx+dz*dz;
+        var t = L2<1e-6 ? 0 : Math.max(0, Math.min(1,
+                ((x-a[0])*dx + (z-a[1])*dz)/L2));
+        var qx=a[0]+dx*t, qz=a[1]+dz*t;
+        if((x-qx)*(x-qx) + (z-qz)*(z-qz) < nua*nua) return false;
+      }
+    }
+    return true;
+  }
+
+  /* lưới băm để dò khoảng cách giữa các gốc cây cho khỏi quét toàn bộ */
+  var O = 6, luoi = {};
+  function khoa(x,z){ return Math.floor(x/O) + ':' + Math.floor(z/O); }
+  function ghi(x,z){ (luoi[khoa(x,z)] = luoi[khoa(x,z)] || []).push([x,z]); }
+  function thoang(x,z,d){
+    var gx=Math.floor(x/O), gz=Math.floor(z/O), d2=d*d;
+    for(var i=gx-1;i<=gx+1;i++) for(var j=gz-1;j<=gz+1;j++){
+      var o=luoi[i+':'+j];
+      if(!o) continue;
+      for(var k=0;k<o.length;k++)
+        if((o[k][0]-x)*(o[k][0]-x) + (o[k][1]-z)*(o[k][1]-z) < d2) return false;
+    }
+    return true;
+  }
+  D.cay.forEach(function(c){ ghi(c.x, c.z); });
+
+  var them = [];
+  function dat(x, z, d){
+    if(!trongDaGiac([x,z], ranh)) return false;
+    for(var i=0;i<cam.length;i++) if(trongDaGiac([x,z], cam[i])) return false;
+    if(!xaDuong(x,z)) return false;
+    if(!thoang(x, z, d || CACH_CAY)) return false;
+    var r = ng();
+    var loai = r < 0.70 ? 'co-thu' : (r < 0.90 ? 'cau' : 'bui');
+    var cao = loai === 'co-thu' ? 8.4 + ng()*6.4
+            : loai === 'cau'    ? 6.0 + ng()*3.2
+                                : 2.0 + ng()*1.2;
+    them.push({x:x, z:z, loai:loai, cao:Math.round(cao*10)/10, trong:1});
+    ghi(x, z);
+    return true;
+  }
+
+  /* ── 1. vành cổ thụ men theo tường bao, lùi vào trong 6m ── */
+  var trong6 = offset(ranh, 6.0);
+  if(trong6 && trong6.length === ranh.length){
+    var du = 0;
+    for(var i=0;i<trong6.length;i++){
+      var a=trong6[i], b=trong6[(i+1)%trong6.length];
+      var dx=b[0]-a[0], dz=b[1]-a[1], L=Math.hypot(dx,dz);
+      if(L < 0.01) continue;
+      var t = du;
+      while(t < L){
+        var r = t/L;
+        dat(a[0]+dx*r + (ng()-0.5)*2.4, a[1]+dz*r + (ng()-0.5)*2.4);
+        t += 7.2 + ng()*2.6;
+      }
+      du = t - L;
+    }
+  }
+
+  /* ── 2. hai hàng cây kèm lối đi trong trường ── */
+  loi.forEach(function(r){
+    var lech = r.rong/2 + 3.4;
+    var du = 0;
+    for(var i=0;i<r.diem.length-1;i++){
+      var a=r.diem[i], b=r.diem[i+1];
+      var dx=b[0]-a[0], dz=b[1]-a[1], L=Math.hypot(dx,dz);
+      if(L < 0.01) continue;
+      var nx=-dz/L, nz=dx/L;
+      var t=du;
+      while(t < L){
+        var rr=t/L, cx=a[0]+dx*rr, cz=a[1]+dz*rr;
+        dat(cx + nx*lech, cz + nz*lech);
+        dat(cx - nx*lech, cz - nz*lech);
+        t += 8.4 + ng()*2.0;
+      }
+      du = t - L;
+    }
+  });
+
+  /* ── 3. rải nốt các khoảng sân còn trống ── */
+  for(var gz=bz0; gz<bz1; gz+=8.6){
+    for(var gx=bx0; gx<bx1; gx+=8.6){
+      dat(gx + ng()*6.0, gz + ng()*6.0, 6.4);
+    }
+  }
+
+  /* ── giữ trần: bỏ bớt cây thêm nếu vượt, ưu tiên giữ cây rải đều ── */
+  var daCo = D.cay.filter(function(c){ return c.trong; }).length;
+  var conCho = Math.max(0, TRAN - daCo);
+  if(them.length > conCho){
+    var giu = [], buoc = them.length / conCho;
+    for(var i=0;i<conCho;i++) giu.push(them[Math.floor(i*buoc)]);
+    them = giu;
+  }
+  D.cay = D.cay.concat(them);
+})();
+
 var cayTrong = D.cay.filter(function(c){ return c.trong; });
 var cayNgoai = D.cay.filter(function(c){ return !c.trong; });
 
 if(CM && CM.vo && CM.la && cayTrong.length){
-  var _r=20260825;
-  function rr(){ _r=(_r*1664525+1013904223)%4294967296; return _r/4294967296; }
   var vlVo=new THREE.MeshLambertMaterial({map:napTex(CM.tex.vo)});
   var vlLa=new THREE.MeshLambertMaterial({map:napTex(CM.tex.la),
     alphaTest:0.4, side:THREE.DoubleSide});
-  [[CM.vo, vlVo],[CM.la, vlLa]].forEach(function(x){
+
+  /* Một mô hình nhân ra vài trăm bản dễ lộ ra là ĐỒ SAO CHÉP: cùng dáng,
+     cùng bề cao, cùng một sắc lá. Ba mẹo dưới đây phá cái đều ấy mà không
+     thêm lấy một tam giác nào — vẫn đúng hai lệnh vẽ như cũ:
+       · xoay quanh trục đứng, mỗi cây một góc;
+       · bóp nhẹ bề ngang so với bề cao, và nghiêng thân vài độ;
+       · đổi sắc tán từng cây bằng instanceColor, non tới già.
+     Sắc lá nhân THÊM vào ảnh tán vốn đã xanh, nên phải chỉnh quanh mức 1
+     thôi: lệch nhiều là cả rặng cây hoá xanh lét như nhựa.
+     Tham số lấy từ một bộ sinh số CỐ ĐỊNH gieo theo chỉ số cây, nên hai
+     lớp vỏ và lá của cùng một cây luôn nhận đúng cùng một dáng. */
+  [[CM.vo, vlVo, false],[CM.la, vlLa, true]].forEach(function(x){
     var im=new THREE.InstancedMesh(hinhCay(x[0]), x[1], cayTrong.length);
     im.castShadow=true; im.receiveShadow=true;
-    var M=new THREE.Matrix4(), Q=new THREE.Quaternion(),
-        V=new THREE.Vector3(), S=new THREE.Vector3();
+    var Mx=new THREE.Matrix4(), Qy=new THREE.Quaternion(), Qn=new THREE.Quaternion(),
+        V=new THREE.Vector3(), S=new THREE.Vector3(), C=new THREE.Color();
     var _t=20260825;
     function tr(){ _t=(_t*1664525+1013904223)%4294967296; return _t/4294967296; }
     cayTrong.forEach(function(c,k){
       var h=c.cao*(c.loai==='bui'?0.5:1);
-      Q.setFromAxisAngle(new THREE.Vector3(0,1,0), tr()*Math.PI*2);
-      V.set(c.x, 0, c.z); S.set(h,h,h);
-      M.compose(V,Q,S); im.setMatrixAt(k,M);
+      var quay=tr()*Math.PI*2, ngh=(tr()-0.5)*0.10, huong=tr()*Math.PI*2;
+      var beo=0.86+tr()*0.30;
+      var sR=0.84+tr()*0.30, sG=0.92+tr()*0.18, sB=0.76+tr()*0.30;
+      Qy.setFromAxisAngle(new THREE.Vector3(0,1,0), quay);
+      Qn.setFromAxisAngle(new THREE.Vector3(Math.cos(huong),0,Math.sin(huong)), ngh);
+      Qy.premultiply(Qn);
+      V.set(c.x, 0, c.z); S.set(h*beo, h, h*beo);
+      Mx.compose(V,Qy,S); im.setMatrixAt(k,Mx);
+      if(x[2] && im.setColorAt){ C.setRGB(sR, sG, sB); im.setColorAt(k, C); }
     });
     im.instanceMatrix.needsUpdate=true;
+    if(im.instanceColor) im.instanceColor.needsUpdate=true;
     scene.add(im);
   });
 }
@@ -1711,7 +2332,12 @@ function khung(){
     renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix();
   }
   /* sân thể thao, tường bao, nhà ngoài phố hiện dần theo giai đoạn */
+  /* Sân thể thao chỉ có từ giai đoạn dự án trường chất lượng cao. Trước
+     đó KHÔNG được để lại cái nhãn nổi lửng lơ giữa bãi đất trống — bản
+     trước quên tắt nhãn nên kéo trục thời gian về 1908 vẫn thấy chữ
+     "Sân thể thao" trôi trên nền cỏ. */
   lopSan.visible = gd >= (D.sanBong[0].tuGD||0);
+  elSan.style.display = lopSan.visible ? '' : 'none';
   lopTuong.visible = gd >= 4;
   /* nhà ngoài phố cũng MỌC LÊN thay vì hiện ra như ma */
   Object.keys(lopNhaNgoai).forEach(function(k){
@@ -1752,7 +2378,7 @@ function khung(){
     if(t && t.p < 0.72){ x.el.style.opacity = 0; return; }
     datNhan(x.el, x.v);
   });
-  datNhan(elSan, tamSan);
+  if(lopSan.visible) datNhan(elSan, tamSan);
   nhanCong.forEach(function(x){ datNhan(x.el, x.v); });
   nhanDuong.forEach(function(x){ datNhan(x.el, x.v); });
   renderer.render(scene,camera);
