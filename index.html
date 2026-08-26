@@ -116,6 +116,10 @@
   .bvt{font-size:13.5px;font-weight:600;line-height:1.35}
   .bva{font-size:11.5px;color:#8B8474;margin-top:3px}
   .bvn{font-size:13px;line-height:1.7;color:#4C4739;margin-top:9px}
+  .bvh{font-size:12.5px;font-weight:700;color:#5B5648;margin-top:12px;
+    letter-spacing:.2px}
+  .bvAnh{display:block;width:100%;height:auto;border-radius:9px;margin-top:10px;
+    background:#EFEAE0}
   .huy{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;
     border-radius:5px;margin-top:9px;letter-spacing:.3px}
   @media(max-width:900px){ #panel{left:12px;right:12px;width:auto;top:auto;
@@ -737,12 +741,16 @@ function vienNet(pts, y){
      Dữ liệu gốc để sẵn mấy đoạn tường cụt hai bên cổng, nhưng chúng
      không chạm được vào cung tường chính, cũng chẳng chạm vào trụ cổng
      — cổng chính hở tới hơn năm mét. Nay bỏ hết các đoạn cụt ấy rồi
-     dựng lại theo đúng khe hở thật giữa hai cung tường:
-       · lấy hai đầu tường gần cổng nhất, ở hai cung khác nhau;
-       · hướng cổng đặt VUÔNG GÓC với đoạn nối hai đầu ấy;
-       · cổng lùi vào trong đúng khoảng lùi cũ, hai đoạn tường mới
-         xoè từ hai đầu tường vào đúng tâm hai trụ cổng.
-     Nhờ vậy tường — tường cụt — trụ cổng nối liền một mạch. */
+     dựng lại theo khe hở thật giữa hai cung tường.
+
+     HƯỚNG CỔNG lấy theo TIẾP TUYẾN CỦA TƯỜNG tại hai đầu khe, chứ không
+     lấy theo dây cung nối hai đầu ấy. Chỗ cổng chính, ranh giới có một
+     bậc thụt: đầu cung tường phía tây dừng ở z≈39 còn đầu cung phía đông
+     lại bắt đầu ở z≈33, nên dây cung dốc hơn hẳn mặt phố. Đặt cổng vuông
+     góc với dây cung thì cổng xoay chéo đi chừng hai mươi độ, nhìn ra
+     không ăn nhập gì với đường Thuỵ Khuê. Lấy trung bình hai tiếp tuyến
+     thì cánh cổng song song với mặt phố, đúng như ảnh chụp thực địa —
+     còn bậc thụt kia để hai đoạn tường cụt xoè ra gánh. */
   if(D.tuongTruong && D.cong && D.cong.length){
     var cungChinh = D.tuongTruong.filter(function(c){ return c.length > 2; });
 
@@ -752,39 +760,87 @@ function vienNet(pts, y){
       c.forEach(function(p){ C[0]+=p[0]; C[1]+=p[1]; nC++; }); });
     if(nC){ C[0]/=nC; C[1]/=nC; }
 
+    /* tiếp tuyến của cung tường ngay tại đầu mút đang xét */
+    /* Tiếp tuyến lấy trên một ĐOẠN DÀI chừng năm mét, không lấy một
+       đoạn con duy nhất: dữ liệu OSM có chỗ đoạn cuối cùng chỉ dài tám
+       mươi phân, hướng của nó là nhiễu chứ không phải hướng bức tường,
+       mà cổng thì lại xoay theo. */
+    function tiepTuyen(c, dauCuoi, tam){
+      var n=c.length, b = dauCuoi ? c[n-1] : c[0], a = b;
+      if(dauCuoi){
+        for(var i=n-2;i>=0;i--){ a=c[i];
+          if(Math.hypot(b[0]-a[0], b[1]-a[1]) >= tam) break; }
+      } else {
+        for(var i=1;i<n;i++){ a=c[i];
+          if(Math.hypot(b[0]-a[0], b[1]-a[1]) >= tam) break; }
+      }
+      var dx=b[0]-a[0], dz=b[1]-a[1], L=Math.hypot(dx,dz)||1;
+      return [dx/L, dz/L];
+    }
+
     var tuongMoi = cungChinh.slice();
     D.cong.forEach(function(g){
       var ds = [];
       cungChinh.forEach(function(c, k){
-        [c[0], c[c.length-1]].forEach(function(p){
-          ds.push({p:p, k:k, d:Math.hypot(p[0]-g.x, p[1]-g.z)});
-        });
+        ds.push({p:c[0],             c:c, k:k, cuoi:false,
+                 d:Math.hypot(c[0][0]-g.x, c[0][1]-g.z)});
+        ds.push({p:c[c.length-1],    c:c, k:k, cuoi:true,
+                 d:Math.hypot(c[c.length-1][0]-g.x, c[c.length-1][1]-g.z)});
       });
       ds.sort(function(a,b){ return a.d - b.d; });
       var e1 = ds[0], e2 = null;
       for(var i=1; i<ds.length; i++) if(ds[i].k !== e1.k){ e2 = ds[i]; break; }
       if(!e1 || !e2 || e2.d > 26) return;
 
-      var ux = e2.p[0]-e1.p[0], uz = e2.p[1]-e1.p[1];
-      var khe = Math.hypot(ux, uz) || 1; ux/=khe; uz/=khe;
       var mx = (e1.p[0]+e2.p[0])/2, mz = (e1.p[1]+e2.p[1])/2;
+      var day = [e2.p[0]-e1.p[0], e2.p[1]-e1.p[1]];
+      var khe = Math.hypot(day[0], day[1]) || 1;
+      day[0]/=khe; day[1]/=khe;
+
+      /* gộp hai tiếp tuyến, chỉnh cho cùng chiều với dây cung e1→e2 */
+      var t1 = tiepTuyen(e1.c, e1.cuoi, 5), t2 = tiepTuyen(e2.c, e2.cuoi, 5);
+      if(t1[0]*day[0] + t1[1]*day[1] < 0){ t1=[-t1[0],-t1[1]]; }
+      if(t2[0]*day[0] + t2[1]*day[1] < 0){ t2=[-t2[0],-t2[1]]; }
+      var ux = t1[0]+t2[0], uz = t1[1]+t2[1];
+      var uL = Math.hypot(ux, uz);
+      if(uL < 0.2){ ux = day[0]; uz = day[1]; }      // hai tiếp tuyến ngược nhau
+      else { ux/=uL; uz/=uL; }
+
       var nx = -uz, nz = ux;
       if((C[0]-mx)*nx + (C[1]-mz)*nz < 0){ nx = -nx; nz = -nz; }
 
       var lui = (g.x-mx)*nx + (g.z-mz)*nz;
       lui = Math.max(2.6, Math.min(6.0, lui));
-      var rong = Math.min(g.rong, Math.max(3.0, khe-1.6));
+      /* bề ngang cổng không được vượt hình chiếu của khe lên trục cổng,
+         kẻo trụ cổng lại chồi ra ngoài hai đầu tường */
+      var chieu = Math.abs(day[0]*ux + day[1]*uz) * khe;
+      var rong = Math.min(g.rong, Math.max(3.0, chieu - 1.4));
 
       g.rong = rong;
       g.x = mx + nx*lui;  g.z = mz + nz*lui;
       g.tiep = [ux, uz];
       g.phap = [nx, nz];
 
-      tuongMoi.push([[e1.p[0], e1.p[1]], [g.x - ux*rong/2, g.z - uz*rong/2]]);
-      tuongMoi.push([[e2.p[0], e2.p[1]], [g.x + ux*rong/2, g.z + uz*rong/2]]);
+      var t1p = [g.x - ux*rong/2, g.z - uz*rong/2];
+      var t2p = [g.x + ux*rong/2, g.z + uz*rong/2];
+      /* đầu tường nào ứng với trụ nào: so theo trục cổng */
+      if((e1.p[0]-mx)*ux + (e1.p[1]-mz)*uz > 0){ var tmp=t1p; t1p=t2p; t2p=tmp; }
+      tuongMoi.push([[e1.p[0], e1.p[1]], t1p]);
+      tuongMoi.push([[e2.p[0], e2.p[1]], t2p]);
+      /* giữ lại hai đoạn tường cụt: biển tên trường phải gắn lên chúng,
+         chứ tính theo trục cổng thì tấm biển treo lửng giữa không khí */
+      g.tuongBen = [[[e1.p[0], e1.p[1]], t1p], [[e2.p[0], e2.p[1]], t2p]];
     });
     D.tuongTruong = tuongMoi;
   }
+
+  /* ── D. đánh dấu toà dựng theo lối riêng ────────────────────────
+     Đặt ở đây chứ không sửa vào khối DULIEU: khối ấy là một dòng dài
+     1,8 triệu ký tự do tienxuly.py sinh ra, chạm vào là lần xuất dữ
+     liệu sau ghi đè mất. */
+  (D.nhaCVA||[]).forEach(function(b){
+    if(b.ten === 'Hội trường Thăng Long') b.chiTiet = 'hoi-truong';
+  });
 })();
 /* ── mặt nền khu vực ───────────────────────────────────────────────── */
 var M = D.mau;
@@ -876,65 +932,129 @@ if(D.tuongTruong){
    nhờ lớp cây, không cần vòng tường. */
 
 /* ── cổng ─────────────────────────────────────────────────────────
-   Bản trước đặt trụ LỆCH THEO PHÁP TUYẾN của ranh, tức là hai trụ nằm
-   trước–sau theo chiều xuyên qua ranh, nên cổng chắn ngang giữa đường.
-   Đúng ra hai trụ phải nằm hai bên LỐI ĐI, tức là lệch theo TIẾP TUYẾN
-   của ranh. Toạ độ cổng cũng đã lùi vào trong khuôn viên 4,5m (cong.py)
-   để một mặt quay vào sân, một mặt quay ra đường. */
+   Hai trụ nằm hai bên LỐI ĐI, tức là lệch theo TIẾP TUYẾN của tường,
+   không phải theo pháp tuyến — lệch theo pháp tuyến thì cổng chắn ngang
+   giữa đường. Hướng tiếp tuyến đã được nắn lại ở phần đầu tệp cho song
+   song với mặt phố.
+
+   Hình cổng chính dựng theo ảnh chụp thực địa, KHÔNG theo lối tam quan:
+     · hai trụ vuông vôi trắng, thân có ô lõm chạy dọc, đỉnh là mũ đua ra
+       hai bậc — chứ không phải chóp nhọn;
+     · GIỮA HAI TRỤ KHÔNG CÓ DẦM: ảnh cho thấy trời thông thống phía trên
+       cánh cổng, tấm băng đỏ chỉ là vải căng tạm nên bỏ hẳn, kéo theo cả
+       biển tên đỏ gắn trên dầm cũng bỏ;
+     · cánh cổng sắt là hàng song đứng thưa trong khung, mở hé vào trong;
+     · biển tên trường là tấm đá gắn trên đoạn tường bên trái, thấp ngang
+       tầm mắt, đúng chỗ tấm biển thật.                                  */
 var nutCong = [];
 D.cong.forEach(function(g){
   var G = new THREE.Group();
-  var hx = g.tiep[0], hz = g.tiep[1];       // dọc theo ranh
+  var hx = g.tiep[0], hz = g.tiep[1];       // dọc theo tường
   var goc = Math.atan2(-hz, hx);            // xoay hộp cho cạnh dài trùng tiếp tuyến
   var nx = g.phap ? g.phap[0] : -hz, nz = g.phap ? g.phap[1] : hx;
   var chinh = g.loai === 'chinh';
-  var caoTru = chinh ? 6.4 : 3.9;
-  var toTru  = chinh ? 1.6 : 0.95;
+  var caoTru = chinh ? 5.2 : 3.6;
+  var toTru  = chinh ? 1.30 : 0.85;
   var off    = g.rong/2;
   var mTru  = new THREE.MeshLambertMaterial({color:M.truCong});
   var mChop = new THREE.MeshLambertMaterial({color:M.chopCong});
+  var mSat  = new THREE.MeshLambertMaterial({color:M.songSat});
+
+  function hop(dx,dy,dz, px,py,pz, mat, xoay){
+    var m=new THREE.Mesh(new THREE.BoxGeometry(dx,dy,dz), mat);
+    m.position.set(px,py,pz); m.rotation.y = (xoay===undefined?goc:xoay);
+    m.castShadow=true; G.add(m); return m;
+  }
 
   [-1, 1].forEach(function(s){
     var px = g.x + hx*off*s, pz = g.z + hz*off*s;
-    var tru = new THREE.Mesh(new THREE.BoxGeometry(toTru, caoTru, toTru), mTru);
-    tru.position.set(px, caoTru/2, pz);
-    tru.rotation.y = goc; tru.castShadow = true; G.add(tru);
-    var chop = new THREE.Mesh(new THREE.ConeGeometry(toTru*0.85, 1.25, 4), mChop);
-    chop.position.set(px, caoTru + 0.6, pz);
-    chop.rotation.y = Math.PI/4; chop.castShadow = true; G.add(chop);
+    hop(toTru, caoTru, toTru, px, caoTru/2, pz, mTru);
+    if(chinh){
+      /* ô lõm chạy dọc thân trụ, trên cả bốn mặt — nhờ mấy đường gờ này
+         mà cái trụ đọc ra là trụ xây, không phải cột hộp trơn */
+      [[hx,hz],[nx,nz]].forEach(function(h){
+        [-1,1].forEach(function(q){
+          hop(toTru-0.42, caoTru-1.9, 0.10,
+              px + h[0]*q*(toTru/2-0.03), (caoTru-1.9)/2 + 0.75,
+              pz + h[1]*q*(toTru/2-0.03), mChop,
+              Math.atan2(-h[1], h[0]));
+        });
+      });
+      /* mũ trụ hai bậc, bậc trên đua rộng hơn */
+      hop(toTru+0.26, 0.22, toTru+0.26, px, caoTru+0.11, pz, mTru);
+      hop(toTru+0.52, 0.20, toTru+0.52, px, caoTru+0.32, pz, mChop);
+      hop(toTru*0.55, 0.34, toTru*0.55, px, caoTru+0.59, pz, mTru);
+    } else {
+      hop(toTru+0.20, 0.18, toTru+0.20, px, caoTru+0.09, pz, mTru);
+      hop(toTru*0.5, 0.28, toTru*0.5, px, caoTru+0.32, pz, mChop);
+    }
   });
 
   if(chinh){
-    /* mũ trụ ngói đỏ trên hai trụ chính */
+    /* ── cánh cổng sắt: khung + hàng song đứng, mở hé vào trong ── */
+    var caoCanh = caoTru - 1.35;
     [-1,1].forEach(function(s){
-      var mu=new THREE.Mesh(new THREE.BoxGeometry(toTru+0.34,0.28,toTru+0.34), mChop);
-      mu.position.set(g.x+hx*off*s, caoTru+0.14, g.z+hz*off*s);
-      mu.rotation.y=goc; mu.castShadow=true; G.add(mu);
+      var K = new THREE.Group();
+      var rongCanh = g.rong*0.47;
+      /* khung: đố trên, đố dưới, hai đố đứng */
+      [[rongCanh,0.16, caoCanh-0.08],[rongCanh,0.14, 0.07]].forEach(function(t){
+        var m=new THREE.Mesh(new THREE.BoxGeometry(t[0],t[1],0.11), mSat);
+        m.position.set(0, t[2], 0); m.castShadow=true; K.add(m);
+      });
+      var m2=new THREE.Mesh(new THREE.BoxGeometry(rongCanh,0.12,0.11), mSat);
+      m2.position.set(0, caoCanh*0.62, 0); K.add(m2);
+      [-1,1].forEach(function(q){
+        var m=new THREE.Mesh(new THREE.BoxGeometry(0.13,caoCanh,0.13), mSat);
+        m.position.set(q*rongCanh/2, caoCanh/2, 0); m.castShadow=true; K.add(m);
+      });
+      /* song đứng thưa */
+      var soSong = Math.max(5, Math.round(rongCanh/0.42));
+      for(var i=1;i<soSong;i++){
+        var m=new THREE.Mesh(new THREE.BoxGeometry(0.075,caoCanh-0.18,0.075), mSat);
+        m.position.set(-rongCanh/2 + rongCanh*i/soSong, caoCanh/2, 0);
+        K.add(m);
+      }
+      /* bản lề ở trụ, cánh xoay vào trong một góc */
+      var mo = 0.62 * s;
+      var bx = g.x + hx*off*s, bz = g.z + hz*off*s;
+      var ga = goc - mo;
+      K.position.set(bx - hx*(toTru*0.5)*s*Math.cos(mo) , 0, bz - hz*(toTru*0.5)*s*Math.cos(mo));
+      K.rotation.y = ga;
+      /* dịch tâm cánh ra khỏi bản lề: quay quanh mép chứ không quanh giữa */
+      var ex = Math.cos(ga), ez = -Math.sin(ga);
+      K.position.x -= ex * (rongCanh/2) * s;
+      K.position.z -= ez * (rongCanh/2) * s;
+      G.add(K);
     });
-    /* dầm ngang dày, có gờ trên gờ dưới */
-    var xa=new THREE.Mesh(new THREE.BoxGeometry(g.rong+toTru*0.4, 1.35, 0.85), mTru);
-    xa.position.set(g.x, caoTru-0.75, g.z); xa.rotation.y=goc;
-    xa.castShadow=true; G.add(xa);
-    [-0.72, 0.72].forEach(function(dy){
-      var go=new THREE.Mesh(new THREE.BoxGeometry(g.rong+toTru*0.7, 0.22, 1.05), mChop);
-      go.position.set(g.x, caoTru-0.75+dy, g.z); go.rotation.y=goc;
-      go.castShadow=true; G.add(go);
-    });
-    /* biển tên đỏ gắn trên dầm */
-    var bien=new THREE.Mesh(new THREE.BoxGeometry(g.rong-1.4, 0.92, 0.16),
-      new THREE.MeshLambertMaterial({color:M.bienCong}));
-    bien.position.set(g.x+nx*0.5, caoTru-0.75, g.z+nz*0.5);
-    bien.rotation.y=goc; bien.castShadow=true; G.add(bien);
-    /* hai cánh cổng sắt xanh mở hé vào trong */
-    [-1,1].forEach(function(s){
-      var canh=new THREE.Mesh(new THREE.BoxGeometry(g.rong*0.46, caoTru-1.6, 0.10),
-        new THREE.MeshLambertMaterial({color:M.songSat}));
-      var m1=g.rong*0.23;
-      canh.position.set(g.x+hx*(off-m1*0.55)*s + nx*m1*0.62,
-                        (caoTru-1.6)/2,
-                        g.z+hz*(off-m1*0.55)*s + nz*m1*0.62);
-      canh.rotation.y=goc + s*0.85; canh.castShadow=true; G.add(canh);
-    });
+
+    /* ── biển tên trường ─────────────────────────────────────────
+       Gắn lên chính đoạn tường cụt bên trái, mặt quay ra phố, đúng chỗ
+       tấm biển đá thật. Đặt theo trục cổng như bản trước thì biển rơi
+       ra ngoài mặt tường ba mét, treo lơ lửng giữa không khí.
+       Cho vào lopTuong chứ không vào nhóm cổng, để nó hiện/tắt cùng
+       bức tường mà nó gắn lên, không thì kéo trục thời gian về trước
+       năm 1975 là thấy tấm biển bay một mình. */
+    var tb = g.tuongBen && g.tuongBen[0];
+    if(tb){
+      var q1=tb[0], q2=tb[1];
+      var wx=q2[0]-q1[0], wz=q2[1]-q1[1], wl=Math.hypot(wx,wz)||1;
+      wx/=wl; wz/=wl;
+      var ngx=-wz, ngz=wx;                       // pháp tuyến của đoạn tường
+      if(ngx*nx + ngz*nz > 0){ ngx=-ngx; ngz=-ngz; }   // quay ra phố
+      var bgc=Math.atan2(-wz, wx);
+      var bx2=(q1[0]+q2[0])/2 + ngx*0.30, bz2=(q1[1]+q2[1])/2 + ngz*0.30;
+      var rongB=Math.min(2.3, wl-0.8);
+      if(rongB > 0.9){
+        var t1b=new THREE.Mesh(new THREE.BoxGeometry(rongB, 1.35, 0.14),
+          new THREE.MeshLambertMaterial({color:0xF2EDE0}));
+        t1b.position.set(bx2, 1.85, bz2); t1b.rotation.y=bgc;
+        t1b.castShadow=true; lopTuong.add(t1b);
+        var t2b=new THREE.Mesh(new THREE.BoxGeometry(rongB-0.34, 1.02, 0.06),
+          new THREE.MeshLambertMaterial({color:M.bienCong}));
+        t2b.position.set(bx2+ngx*0.09, 1.85, bz2+ngz*0.09); t2b.rotation.y=bgc;
+        t2b.castShadow=true; lopTuong.add(t2b);
+      }
+    }
   }
   scene.add(G);
   nutCong.push({d:g, tam:new THREE.Vector3(g.x, caoTru + 3, g.z)});
@@ -1486,6 +1606,127 @@ function hanhLang(b, pc){
      2. Trụ lồi chia gian + dải phào ngang ở mỗi cao độ sàn và dưới chân mái.
      3. Đầu xà gỗ nhô ra dưới diềm mái, theo đúng nhịp cột.
    Trả về các hình học đã gộp, tách theo vật liệu.                      */
+/* ══ HIÊN CỘT LỚN — HỘI TRƯỜNG THĂNG LONG ══════════════════════════
+   Toà này không cùng lối với mấy dãy nhà Pháp, nên đắp phào cuốn vòm
+   như các dãy kia là sai hẳn. Ảnh chụp cho thấy một hàng cột tròn mảnh
+   cao suốt hai tầng, đội một tấm mái bằng phẳng lì; tầng dưới lùi vào
+   sau hàng cột là mấy bộ cửa xanh, trên mỗi bộ có một vì kèo hình tam
+   giác; tầng trên là mảng hoa gió bê tông đúc rỗng chạy kín các gian,
+   giữa mặt tiền gắn tấm phù hiệu trường. Hai đầu hồi là trụ đặc bản to,
+   mặt trụ có ô chạm.
+   Dựng riêng cho cạnh dài nhất — cạnh quay ra sân — còn ba cạnh kia vẫn
+   để bộ mặt tiền chung xử lí.
+
+   Riêng mảng hoa gió ngốn hơn trăm khối con. Để rời thì một mình toà
+   này thêm gần 170 lệnh vẽ, nên gom hết theo vật liệu bằng gop() —
+   xuống còn năm. Hộp nào cần nghiêng thì xoay sẵn vào hình học trước
+   khi gom, vì gop() chỉ nhận phép xoay quanh trục đứng.               */
+function canhDaiNhat(mb){
+  var iBest=0, dBest=-1;
+  for(var i=0;i<mb.length;i++){
+    var a=mb[i], c=mb[(i+1)%mb.length];
+    var L=Math.hypot(c[0]-a[0], c[1]-a[1]);
+    if(L>dBest){ dBest=L; iBest=i; }
+  }
+  return iBest;
+}
+function hoiTruong(b, G, mats, pc){
+  var mb=b.matBang, i=(b.canhTruoc===undefined?canhDaiNhat(mb):b.canhTruoc);
+  var a=mb[i], c=mb[(i+1)%mb.length];
+  var ph=offset(mb,-1), pa=ph[i], pb=ph[(i+1)%ph.length];
+  var mx=(a[0]+c[0])/2, mz=(a[1]+c[1])/2;
+  var nx=(pa[0]+pb[0])/2-mx, nz=(pa[1]+pb[1])/2-mz;
+  var nl=Math.hypot(nx,nz)||1; nx/=nl; nz/=nl;                 // ra ngoài
+  var dx=c[0]-a[0], dz=c[1]-a[1], L=Math.hypot(dx,dz)||1; dx/=L; dz/=L;
+  var goc=Math.atan2(-dz,dx);
+  var cao=b.tang*b.caoTang;
+
+  var SAU=3.0;              // độ vươn của hiên
+  var CAO_SAN=0.55;         // cốt sàn hiên
+  var soGian=Math.max(4, Math.round(L/4.4));
+  var buoc=L/soGian;
+
+  var dsVoi=[], dsSan=[], dsCua=[], dsHoa=[], dsPhu=[];
+  function P(t, ra){ return [a[0]+dx*t+nx*ra, a[1]+dz*t+nz*ra]; }
+  /* hộp áp mặt tường: w dọc cạnh, h đứng, d xuyên tường */
+  function hop(ds, w,h,d, t,y,ra, nghieng){
+    var g=new THREE.BoxGeometry(w,h,d);
+    if(nghieng) g.rotateZ(nghieng);
+    var p=P(t,ra);
+    ds.push({g:g, p:[p[0], y, p[1]], ry:goc});
+  }
+  function tru(ds, g, t, y, ra){
+    var p=P(t,ra); ds.push({g:g, p:[p[0], y, p[1]], ry:goc});
+  }
+
+  /* ── sàn hiên và bậc thềm ── */
+  hop(dsSan, L+1.2, CAO_SAN, SAU+0.9, L/2, CAO_SAN/2, SAU/2-0.2);
+  for(var s=0;s<3;s++)
+    hop(dsSan, L+0.4-s*0.5, 0.17, 0.46, L/2, CAO_SAN-0.085-s*0.17, SAU+0.30+s*0.46);
+
+  /* ── hàng cột tròn, mảnh, cao suốt hai tầng ── */
+  var gCot=new THREE.CylinderGeometry(0.29,0.34,cao-CAO_SAN,14);
+  var gMuCot=new THREE.CylinderGeometry(0.42,0.30,0.30,14);
+  for(var k=0;k<=soGian;k++){
+    var t=Math.min(L-0.35, Math.max(0.35, buoc*k));
+    tru(dsVoi, gCot,   t, CAO_SAN+(cao-CAO_SAN)/2, SAU-0.35);
+    tru(dsVoi, gMuCot, t, cao-0.15,                SAU-0.35);
+  }
+
+  /* ── hai trụ đặc ở hai đầu hồi, mặt trụ có ô chạm ── */
+  [0.55, L-0.55].forEach(function(t){
+    hop(dsVoi, 1.10, cao-CAO_SAN, 1.10, t, CAO_SAN+(cao-CAO_SAN)/2, SAU-0.35);
+    [0.32, 0.62].forEach(function(f){
+      hop(dsHoa, 0.66, (cao-CAO_SAN)*0.20, 0.06, t, CAO_SAN+(cao-CAO_SAN)*f, SAU+0.22);
+    });
+  });
+
+  /* ── mái bằng: tấm dày đội trên hàng cột, đua ra bốn phía ── */
+  hop(dsVoi, L+1.9, 0.52, SAU+1.1, L/2, cao+0.26, SAU/2-0.15);
+  hop(dsSan, L+2.1, 0.16, SAU+1.3, L/2, cao+0.60, SAU/2-0.15);
+
+  /* ── tầng dưới: cửa xanh, trên mỗi bộ một vì kèo tam giác ── */
+  var yCua=CAO_SAN+0.05, caoCua=Math.min(3.6, b.caoTang-1.5);
+  var rongCua=Math.min(2.6, buoc*0.62);
+  var nghieng=Math.atan2(0.62, rongCua/2);
+  for(var k=0;k<soGian;k++){
+    var t=buoc*(k+0.5);
+    hop(dsCua, rongCua, caoCua, 0.16, t, yCua+caoCua/2, 0.10);
+    hop(dsVoi, rongCua, 0.10, 0.20, t, yCua+caoCua*0.72, 0.12);
+    hop(dsVoi, 0.11, caoCua, 0.20, t, yCua+caoCua/2, 0.12);
+    for(var q=-1;q<=1;q+=2)
+      hop(dsCua, rongCua/2/Math.cos(nghieng), 0.13, 0.14,
+          t + q*rongCua/4, yCua+caoCua+0.47, 0.16, -q*nghieng);
+  }
+
+  /* ── tầng trên: mảng hoa gió đúc rỗng giữa các gian ── */
+  var yH0=b.caoTang+0.55, yH1=cao-1.15, caoH=yH1-yH0;
+  if(caoH > 1.2) for(var k=0;k<soGian;k++){
+    var t=buoc*(k+0.5), w=buoc-0.95;
+    if((soGian%2===1) && (k===(soGian-1)/2)){
+      /* phù hiệu trường thay cho hoa gió ở gian chính giữa */
+      hop(dsVoi, Math.min(2.6,w), caoH*0.66, 0.14, t, yH0+caoH*0.5, 0.10);
+      hop(dsPhu, Math.min(2.1,w-0.5), caoH*0.48, 0.08, t, yH0+caoH*0.5, 0.17);
+      continue;
+    }
+    hop(dsCua, w, caoH, 0.10, t, yH0+caoH/2, -0.02);   // lòng tối phía sau
+    hop(dsHoa, w, 0.16, 0.13, t, yH0+0.08, 0.09);
+    hop(dsHoa, w, 0.16, 0.13, t, yH1-0.08, 0.09);
+    var oN=3, oD=Math.max(2, Math.round(w/0.75));
+    for(var q=1;q<oN;q++) hop(dsHoa, w, 0.12, 0.12, t, yH0+caoH*q/oN, 0.09);
+    for(var q=0;q<=oD;q++)
+      hop(dsHoa, 0.12, caoH, 0.12, t - w/2 + w*q/oD, yH0+caoH/2, 0.09);
+  }
+
+  [[dsVoi,0xF2EFE6],[dsSan,0xD8D2C4],[dsCua,0x1F6B5E],
+   [dsHoa,0xE6E2D6],[dsPhu,0x2E7FA8]].forEach(function(x){
+    if(!x[0].length) return;
+    var m=new THREE.MeshLambertMaterial({color:x[1], transparent:true});
+    var msh=new THREE.Mesh(gop(x[0]), m);
+    msh.castShadow=msh.receiveShadow=true; G.add(msh); mats.push(m);
+  });
+}
+
 function matTienChiTiet(b){
   var mt=b.matTien||{}, mb=b.matBang, ph=offset(mb,-1);
   var buoc=mt.buocCot||3.4, rw=mt.rongCua||1.4, rh=mt.caoCua||2.2, vom=!!mt.vom;
@@ -1516,7 +1757,13 @@ function matTienChiTiet(b){
     quad(V,N,E,F,B,A,  0,-1,0);               // mặt dưới
   }
 
+  /* Cạnh quay ra sân của Hội trường Thăng Long do hoiTruong() lo trọn,
+     bộ mặt tiền chung mà chạy chồng lên đó thì cửa chớp với phào cuốn
+     vòm sẽ đâm xuyên qua hàng cột. */
+  var canhBoQua = (b.chiTiet==='hoi-truong')
+    ? (b.canhTruoc===undefined ? canhDaiNhat(mb) : b.canhTruoc) : -1;
   for(var i=0;i<mb.length;i++){
+    if(i === canhBoQua) continue;
     var a=mb[i], c=mb[(i+1)%mb.length];
     var mx=(a[0]+c[0])/2, mz=(a[1]+c[1])/2;
     var pa=ph[i], pb=ph[(i+1)%ph.length];
@@ -1786,6 +2033,8 @@ D.nhaCVA.forEach(function(b){
     mv.castShadow=true; G.add(mv); mats.push(mv.material);
     var ms2=new THREE.Mesh(gop(hv.san), mVoi);
     ms2.castShadow=ms2.receiveShadow=true; G.add(ms2); mats.push(mVoi);
+  } else if(b.chiTiet==='hoi-truong'){
+    hoiTruong(b, G, mats, pc);
   }
 
   G.scale.y=0.0001; G.visible=false; scene.add(G);
@@ -1827,6 +2076,84 @@ function hinhCay(p){
 }
 
 
+var nutTuong = null;
+
+/* ── TƯỢNG CỤ CHU VĂN AN ───────────────────────────────────────────
+   Đặt giữa khoảng sân rộng phía nam dãy S, đúng chỗ khoanh trên ảnh.
+   Quanh chân tượng đã dọn quang một vòng — xem TUONG.donCay ở phần gieo
+   cây — nếu không thì mấy tán cổ thụ trồng dày ở bước trước che kín, kéo
+   camera xuống thấp cũng không thấy tượng đâu.
+   Dựng bằng khối xoay tròn chứ không phải người thật: ở cỡ sa bàn này
+   một hình bóng đúng dáng — áo thụng loe chân, tay chắp trước ngực, mũ
+   cánh chuồn — đọc ra rõ hơn hẳn một mô hình chi li mà bé tí.          */
+var TUONG = { x:-21.0, z:13.0, huong:0.30, donCay:9.0 };
+(function dungTuong(){
+  var G=new THREE.Group();
+  var mDa   = new THREE.MeshLambertMaterial({color:0xCFC7B4});  // bệ đá
+  var mDaSam= new THREE.MeshLambertMaterial({color:0xB3AA95});  // bậc dưới
+  var mDong = new THREE.MeshLambertMaterial({color:0x6E5A3A});  // tượng đồng
+  var mBien = new THREE.MeshLambertMaterial({color:0x3A3226});
+
+  function dat(o, y){ o.position.set(TUONG.x, y, TUONG.z);
+    o.castShadow=true; o.receiveShadow=true; G.add(o); return o; }
+
+  /* sân lát quanh chân tượng, cho tách khỏi nền cỏ */
+  var san=new THREE.Mesh(new THREE.CylinderGeometry(4.6,4.6,0.14,32),
+    new THREE.MeshLambertMaterial({color:0xE2DCCB}));
+  dat(san, 0.07);
+  var vien=new THREE.Mesh(new THREE.TorusGeometry(4.55,0.12,6,40), mDaSam);
+  vien.rotation.x=Math.PI/2; dat(vien, 0.16);
+
+  /* bệ ba bậc thu dần */
+  dat(new THREE.Mesh(new THREE.BoxGeometry(3.5,0.34,3.5), mDaSam), 0.31);
+  dat(new THREE.Mesh(new THREE.BoxGeometry(2.7,0.30,2.7), mDa),    0.63);
+  dat(new THREE.Mesh(new THREE.BoxGeometry(1.9,2.05,1.9), mDa),    1.80);
+  dat(new THREE.Mesh(new THREE.BoxGeometry(2.2,0.20,2.2), mDa),    2.92);
+
+  /* biển tên gắn mặt trước bệ */
+  var bien=new THREE.Mesh(new THREE.BoxGeometry(1.30,0.52,0.07), mBien);
+  bien.position.set(TUONG.x + Math.sin(TUONG.huong)*0.98, 1.85,
+                    TUONG.z + Math.cos(TUONG.huong)*0.98);
+  bien.rotation.y=TUONG.huong; bien.castShadow=true; G.add(bien);
+
+  /* ── thân tượng ── */
+  var T=new THREE.Group();
+  T.position.set(TUONG.x, 3.02, TUONG.z);
+  T.rotation.y=TUONG.huong;
+  function t(o,y,x,z){ o.position.set(x||0,y,z||0);
+    o.castShadow=true; T.add(o); return o; }
+
+  /* áo thụng: loe rộng ở chân, thắt lại ở ngực */
+  t(new THREE.Mesh(new THREE.CylinderGeometry(0.60,0.86,1.70,18), mDong), 0.85);
+  t(new THREE.Mesh(new THREE.CylinderGeometry(0.50,0.60,0.80,18), mDong), 2.00);
+  /* tay áo buông hai bên, chắp lại phía trước */
+  [-1,1].forEach(function(s){
+    var ta=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.26,0.95,12), mDong);
+    ta.position.set(s*0.50, 1.95, 0.06); ta.rotation.z=-s*0.16;
+    ta.castShadow=true; T.add(ta);
+  });
+  t(new THREE.Mesh(new THREE.SphereGeometry(0.24,14,10), mDong), 1.92, 0, 0.34);
+  /* cổ áo và vai */
+  t(new THREE.Mesh(new THREE.CylinderGeometry(0.30,0.46,0.26,16), mDong), 2.50);
+  /* đầu */
+  var dau=t(new THREE.Mesh(new THREE.SphereGeometry(0.26,16,12), mDong), 2.86);
+  dau.scale.set(0.92,1.10,0.92);
+  /* mũ cánh chuồn: chỏm tròn, vành ngang, hai cánh xoè hai bên */
+  t(new THREE.Mesh(new THREE.CylinderGeometry(0.27,0.29,0.34,16), mDong), 3.20);
+  t(new THREE.Mesh(new THREE.CylinderGeometry(0.36,0.36,0.07,18), mDong), 3.02);
+  [-1,1].forEach(function(s){
+    var ca=new THREE.Mesh(new THREE.BoxGeometry(0.40,0.13,0.07), mDong);
+    ca.position.set(s*0.50, 3.18, -0.05); ca.rotation.z=s*0.12;
+    ca.castShadow=true; T.add(ca);
+  });
+  /* râu dài, nét nhận ra cụ đồ ngay từ xa */
+  var rau=new THREE.Mesh(new THREE.ConeGeometry(0.13,0.62,10), mDong);
+  rau.position.set(0,2.52,0.20); rau.rotation.x=Math.PI; rau.castShadow=true; T.add(rau);
+
+  G.add(T);
+  scene.add(G);
+  nutTuong = {G:G, tam:new THREE.Vector3(TUONG.x, 7.4, TUONG.z)};
+})();
 /* ── TRỒNG THÊM CÂY TRONG KHUÔN VIÊN ───────────────────────────────
    Đối chiếu ảnh vệ tinh: trong trường gần như kín tán. Một vành cổ thụ
    chạy sát tường bao, hai hàng cây ôm lấy mọi lối đi, và khoảng sân
@@ -1839,6 +2166,16 @@ function hinhCay(p){
 (function trongThemCay(){
   var ranh = D.ranhTruong;
   if(!ranh || ranh.length < 3) return;
+
+  /* ── dọn quang một vòng quanh tượng cụ Chu Văn An ───────────────
+     Nhổ cả cây có sẵn trong dữ liệu gốc lẫn cây mới gieo. Không dọn thì
+     vành cổ thụ trồng dày ở dưới trùm kín, tượng chỉ còn là một chấm
+     đồng lấp ló giữa tán lá. */
+  if(typeof TUONG === 'object' && TUONG){
+    D.cay = D.cay.filter(function(c){
+      return !(c.trong && Math.hypot(c.x-TUONG.x, c.z-TUONG.z) < TUONG.donCay);
+    });
+  }
 
   var TRAN = 240;            // trần tổng số cây 3D trong khuôn viên
   var CACH_CAY = 5.4;        // hai gốc cây không được gần nhau hơn ngần này
@@ -1908,6 +2245,7 @@ function hinhCay(p){
   var them = [];
   function dat(x, z, d){
     if(!trongDaGiac([x,z], ranh)) return false;
+    if(TUONG && Math.hypot(x-TUONG.x, z-TUONG.z) < TUONG.donCay) return false;
     for(var i=0;i<cam.length;i++) if(trongDaGiac([x,z], cam[i])) return false;
     if(!xaDuong(x,z)) return false;
     if(!thoang(x, z, d || CACH_CAY)) return false;
@@ -2075,6 +2413,9 @@ var elSan=document.createElement('div');
 elSan.className='lbl'; elSan.style.background='#E7FAF0'; elSan.textContent='Sân thể thao';
 lblBox.appendChild(elSan);
 var tamSan=new THREE.Vector3(cxS/nS, 10, czS/nS);
+/* Nhãn hai con phố chỉ bật từ giai đoạn dự án trường chất lượng cao trở
+   đi. Muốn lùi sang giai đoạn cuối thì đổi 5 thành 6 ở dòng dưới. */
+var GD_PHO = 5;
 
 var nhanDuong = [];
 ['Đường Thụy Khuê','Phố Nguyễn Đình Thi'].forEach(function(ten){
@@ -2194,15 +2535,133 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
 
 var MAU_CC={'chac':['#2F5A45','#E4EDE7'],'uoc':['#9A6B25','#F7EBD6'],
             'chua-ro':['#A0522D','#F6E3D8']};
+/* ══ KHO NỘI DUNG TRÊN GITHUB ══════════════════════════════════════
+   Bài viết và ảnh KHÔNG nhúng cứng vào tệp này nữa. Đẩy một tệp .txt
+   lên repo là bảng thông tin của công trình tương ứng tự đọc được.
+
+   ĐẶT TÊN TỆP — lấy tên công trình bỏ dấu, thay khoảng trắng bằng gạch
+   ngang. Cổng thì lấy thẳng mã cổng:
+       B                     ->  noidung/b.txt
+       Nhà Bát Giác          ->  noidung/nha-bat-giac.txt
+       Hội trường Thăng Long ->  noidung/hoi-truong-thang-long.txt
+       Cổng chính            ->  noidung/cong-chinh.txt
+   Muốn đặt tên khác thì thêm khoá "tep" vào công trình trong DULIEU.
+   Ảnh thì thêm hậu tố -anh:   noidung/b-anh.txt
+
+   ĐỊNH DẠNG b.txt — chỉ vài quy ước, viết bằng Notepad cũng xong:
+       # Tên bài viết
+       @ Nguyễn Văn A · lớp 12 Toán · 2024
+       Xuống dòng trống là sang đoạn mới.
+       ## Tiểu mục
+       ![chú thích ảnh](https://.../anh.jpg)
+       ---            <- ba gạch: hết bài này, sang bài khác
+
+   ĐỊNH DẠNG b-anh.txt — mỗi dòng một ảnh, ngăn bằng dấu |
+       https://.../sanTruong.jpg | 1998 | Sân trường nhìn từ nhà B
+
+   TUYỆT ĐỐI KHÔNG dán token GitHub vào tệp này. Tệp HTML chạy trên máy
+   người xem, ai mở công cụ nhà phát triển cũng đọc được. Để repo ở chế
+   độ public là raw.githubusercontent.com cho đọc thoải mái, không cần
+   xác thực gì hết.                                                    */
+var KHO = {
+  chu:    'DOI-TEN-TAI-KHOAN',   // tên tài khoản GitHub
+  repo:   'DOI-TEN-REPO',        // tên repo
+  nhanh:  'main',                // nhánh
+  thuMuc: 'noidung'              // thư mục chứa .txt trong repo
+};
+function khoBat(){
+  return KHO.chu && KHO.repo && KHO.chu.indexOf('DOI-TEN') < 0;
+}
+function khoURL(tep){
+  return 'https://raw.githubusercontent.com/' + KHO.chu + '/' + KHO.repo +
+         '/' + KHO.nhanh + '/' + (KHO.thuMuc ? KHO.thuMuc + '/' : '') + tep;
+}
+/* bỏ dấu tiếng Việt rồi rút thành tên tệp */
+function rutTen(s){
+  return String(s).normalize('NFD')
+    .replace(/[̀-ͯ]/g,'')      // tách dấu ra rồi bỏ
+    .replace(/đ/g,'d').replace(/Đ/g,'D')   // đ Đ không có dạng tách
+    .toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+}
+
+var khoCache = {};
+function khoTai(tep){
+  if(khoCache[tep]) return khoCache[tep];
+  if(!khoBat()){ khoCache[tep] = Promise.resolve(null); return khoCache[tep]; }
+  khoCache[tep] = fetch(khoURL(tep), {cache:'no-cache'})
+    .then(function(r){ return r.ok ? r.text() : null; })
+    .catch(function(){ return null; });   // chưa có tệp, hoặc đang ngoại tuyến
+  return khoCache[tep];
+}
+
+/* chỉ nhận đường dẫn ảnh http(s), chặn javascript: và data: */
+function anhHopLe(u){ return /^https?:\/\/[^\s"'<>]+$/i.test(String(u).trim()); }
+
+/* ── dịch .txt sang HTML ────────────────────────────────────────────
+   Cố ý làm mỏng: mấy quy ước ở trên là đủ cho một bài viết của học
+   sinh, mà cũng không kéo theo cả thư viện markdown vào tệp. */
+function khoDich(vb){
+  return vb.replace(/\r/g,'').split(/\n-{3,}\n/).map(function(bai){
+    var d = bai.split('\n');
+    var tieuDe = '', tacGia = '', than = [], doan = [];
+    function xong(){
+      if(!doan.length) return;
+      than.push('<div class="bvn">' + esc(doan.join(' ')) + '</div>');
+      doan = [];
+    }
+    d.forEach(function(l){
+      var t = l.trim();
+      if(!t){ xong(); return; }
+      var mAnh = t.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      if(mAnh){
+        xong();
+        if(anhHopLe(mAnh[2])){
+          than.push('<img class="bvAnh" loading="lazy" alt="' + esc(mAnh[1]) +
+            '" src="' + esc(mAnh[2]).replace(/"/g,'&quot;') + '">');
+          if(mAnh[1]) than.push('<div class="cap">' + esc(mAnh[1]) + '</div>');
+        }
+        return;
+      }
+      if(/^##\s+/.test(t)){ xong();
+        than.push('<div class="bvh">' + esc(t.replace(/^##\s+/,'')) + '</div>'); return; }
+      if(/^#\s+/.test(t)){ xong(); tieuDe = t.replace(/^#\s+/,''); return; }
+      if(/^@\s+/.test(t)){ xong(); tacGia = t.replace(/^@\s+/,''); return; }
+      doan.push(t);
+    });
+    xong();
+    if(!tieuDe && !than.length) return '';
+    return '<div class="bv">' +
+      (tieuDe ? '<div class="bvt">' + esc(tieuDe) + '</div>' : '') +
+      (tacGia ? '<div class="bva">' + esc(tacGia) + '</div>' : '') +
+      than.join('') + '</div>';
+  }).join('');
+}
+function khoDichAnh(vb){
+  return vb.replace(/\r/g,'').split('\n').map(function(l){
+    var t=l.trim(); if(!t || t.charAt(0)==='#') return '';
+    var p=t.split('|');
+    var u=(p[0]||'').trim();
+    if(!anhHopLe(u)) return '';
+    var nam=(p[1]||'').trim(), ct=(p[2]||'').trim();
+    return '<img class="bvAnh" loading="lazy" alt="' + esc(ct) + '" src="' +
+      esc(u).replace(/"/g,'&quot;') + '">' +
+      ((nam||ct) ? '<div class="cap">' + esc([nam,ct].filter(Boolean).join(' · ')) +
+        '</div>' : '');
+  }).join('');
+}
+
+var luotPanel = 0;      // chống nội dung tải chậm đè lên bảng vừa mở sau
 function moPanel(b, laCong){
   chon=b;
+  var luot = ++luotPanel;
   document.getElementById('pn').textContent=b.ten;
   var cc=(D.chacChan[b.chacChan]||{ten:'Chưa rõ'}).ten;
   var mc=MAU_CC[b.chacChan]||MAU_CC['chua-ro'];
   var dong;
   if(laCong){
     dong='Cổng ra vào'+(b.loai==='chinh'?' · cổng chính':' · cổng phụ')+
-         ' · rộng '+b.rong+' m';
+         ' · rộng '+(+b.rong).toFixed(1)+' m';
   } else {
     var g0=D.giaiDoan[b.tuGD]||D.giaiDoan[0];
     dong='Có mặt từ giai đoạn <b>'+esc(g0.ten)+'</b> ('+g0.tu+'–'+g0.den+')'+
@@ -2213,15 +2672,47 @@ function moPanel(b, laCong){
     '<div><span class="huy" style="color:'+mc[0]+';background:'+mc[1]+'">'+
     esc(cc).toUpperCase()+'</span></div>';
   document.getElementById('pnote').textContent=b.ghiChu||'Chưa có phần giới thiệu.';
-  document.getElementById('pane1').innerHTML=(b.anh&&b.anh.length)
+
+  /* nội dung dựng sẵn trong DULIEU — dùng ngay, khỏi chờ mạng */
+  var sanAnh = (b.anh&&b.anh.length)
     ? b.anh.map(function(a){ return '<div class="photo">Ảnh '+esc(a.file)+
         '<br>sẽ hiện ở đây</div><div class="cap">'+a.nam+' · '+esc(a.chuThich)+'</div>'; }).join('')
-    : '<div class="cap">Chưa sưu tầm được ảnh cho mục này.</div>';
-  document.getElementById('pane2').innerHTML=(b.baiViet&&b.baiViet.length)
+    : '';
+  var sanBai = (b.baiViet&&b.baiViet.length)
     ? b.baiViet.map(function(v){ return '<div class="bv"><div class="bvt">'+esc(v.tieuDe)+
         '</div><div class="bva">'+esc(v.tacGia)+' · lớp '+esc(v.lop)+
         '</div><div class="bvn">'+esc(v.noiDung)+'</div></div>'; }).join('')
-    : '<div class="cap">Chưa có bài viết. Học sinh có thể đóng góp cho mục này.</div>';
+    : '';
+
+  /* ── nội dung lấy từ kho GitHub ──────────────────────────────────
+     Đặt SAU phần dựng sẵn, không ghi đè: tệp trên repo là phần bổ
+     sung, mất mạng thì bảng vẫn còn nguyên nội dung gốc. */
+  var ten = b.tep || rutTen(laCong ? (b.id || b.ten) : b.ten);
+  var doi = khoBat()
+    ? '<div class="cap" id="dangTai">Đang lấy nội dung từ kho…</div>' : '';
+  var trong1 = '<div class="cap">Chưa sưu tầm được ảnh cho mục này.'+
+    (khoBat()?' Đẩy tệp <b>'+esc(ten)+'-anh.txt</b> lên repo là ảnh hiện ở đây.':'')+'</div>';
+  var trong2 = '<div class="cap">Chưa có bài viết. '+
+    (khoBat()?'Đẩy tệp <b>'+esc(ten)+'.txt</b> lên repo là bài hiện ở đây.'
+            :'Học sinh có thể đóng góp cho mục này.')+'</div>';
+
+  document.getElementById('pane1').innerHTML = sanAnh + (sanAnh?'':doi) || trong1;
+  document.getElementById('pane2').innerHTML = sanBai + (sanBai?'':doi) || trong2;
+
+  function dat(paneId, san, trong, html){
+    if(luot !== luotPanel) return;                 // bảng đã đổi, bỏ qua
+    var el = document.getElementById(paneId);
+    if(html) el.innerHTML = san + html;
+    else if(!san) el.innerHTML = trong;
+    else el.innerHTML = san;
+  }
+  khoTai(ten + '.txt').then(function(vb){
+    dat('pane2', sanBai, trong2, vb ? khoDich(vb) : '');
+  });
+  khoTai(ten + '-anh.txt').then(function(vb){
+    dat('pane1', sanAnh, trong1, vb ? khoDichAnh(vb) : '');
+  });
+
   tab(0); panel.classList.add('show'); panel.scrollTop=0;
   meshCVA.forEach(function(x){
     x.tuong.emissive=new THREE.Color(x.d===b?0x2A2410:0x000000); });
@@ -2380,7 +2871,11 @@ function khung(){
   });
   if(lopSan.visible) datNhan(elSan, tamSan);
   nhanCong.forEach(function(x){ datNhan(x.el, x.v); });
-  nhanDuong.forEach(function(x){ datNhan(x.el, x.v); });
+  nhanDuong.forEach(function(x){
+    var hienPho = gd >= GD_PHO;
+    x.el.style.display = hienPho ? '' : 'none';
+    if(hienPho) datNhan(x.el, x.v);
+  });
   renderer.render(scene,camera);
 }
 ve(); khung();
