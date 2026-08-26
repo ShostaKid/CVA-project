@@ -1,2 +1,6 @@
 # url | năm | chú thích  (bỏ dòng bắt đầu bằng # khi không cần nữa)
 https://raw.githubusercontent.com/ShostaKid/CVA-project/main/%E1%BA%A2nh%20CVA%20project/Nh%C3%A0%20b%C3%A1t%20gi%C3%A1c.jpg | 2016 | Nhà Bát Giác
+
+# url | năm | chú thích  (bỏ dòng bắt đầu bằng # khi không cần nữa)
+https://raw.githubusercontent.com/ShostaKid/CVA-project/main/%E1%BA%A2nh%20CVA%20project/1246E665-E134-4D05-BE6C-75BF10C62159.jpg | 2016 | Nhà Bát Giác
+
