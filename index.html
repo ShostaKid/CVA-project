@@ -862,8 +862,25 @@ function vienNet(pts, y){
      1,8 triệu ký tự do tienxuly.py sinh ra, chạm vào là lần xuất dữ
      liệu sau ghi đè mất. */
   (D.nhaCVA||[]).forEach(function(b){
-    if(b.ten === 'Hội trường Thăng Long') b.chiTiet = 'hoi-truong';
+    if(b.ten === 'Hội trường Thăng Long'){ b.chiTiet = 'hoi-truong'; return; }
+    /* Mái các dãy trong trường: một màu gạch bằng, nhạt hơn màu cũ.
+       Hội trường mái bằng lợp tôn xám nên để nguyên, không nhuộm đỏ. */
+    if(b.kieuMai !== 'bang'){ b.mauMai = 0xC65334; b.maiPhang = true; }
   });
+
+  /* ── E. hạ tông bảng màu cho cũ đi ──────────────────────────────
+     Vôi tường đang là 0xE3B961 — vàng chanh, sáng như nhà mới quét.
+     Tường Trường Bưởi là vôi vàng đã bạc, ngả nâu gạch, mảng đậm mảng
+     nhạt. Hạ độ sáng và kéo sắc về phía gạch cho ra tuổi công trình. */
+  D.phongCach['thuoc-dia'].tuong = 0xC79A5B;   // vôi vàng đã bạc
+  D.phongCach['thuoc-dia'].vien  = 0xE6DCC6;   // phào vôi trắng ngà
+  D.phongCach['biet-thu'].tuong  = 0xD3B884;
+  D.phongCach['biet-thu'].vien   = 0xEFE6D2;
+  D.mau.truTuong  = 0xC9A25E;   // trụ tường bao, cùng tông với nhà
+  D.mau.beTuong   = 0xB5A67F;   // bệ xây chân tường
+  D.mau.boMai     = 0xA8452C;   // bờ nóc, sẫm hơn mặt ngói một bậc
+  D.mau.hatMaiCVA = 0xA9674A;   // diềm hắt mái
+  D.mau.truCong   = 0xC9A25E;   // trụ cổng, ăn với tường bao
 })();
 /* ── mặt nền khu vực ───────────────────────────────────────────────── */
 var M = D.mau;
@@ -1078,6 +1095,15 @@ D.cong.forEach(function(g){
       {loai:'bo',    w:1.20},                     // cổng người đi
       {loai:'tru',   w:0.62, cao:3.4, o:false}    // trụ cuối
     ];
+    /* Danh sách trên xếp theo mắt người ĐỨNG NGOÀI PHỐ nhìn vào: biển
+       tên bên trái, cổng người đi bên phải, đúng như ảnh chụp.
+       Nhưng trục t lại chạy theo g.tiep, mà g.tiep chính là hướng TRÁI
+       của người ấy — nên xếp từ t=-W/2 lên là đặt ngược, biển tên chạy
+       sang phải. Lật danh sách một nhát là đúng chiều, và vẫn đúng dù
+       sau này hướng cổng có bị nắn lại. */
+    var trai = [g.phap[1], -g.phap[0]];
+    if(hx*trai[0] + hz*trai[1] > 0) phan.reverse();
+
     var tong=0; phan.forEach(function(q){ tong+=q.w; });
     var he=W/tong; phan.forEach(function(q){ q.w*=he; });
 
@@ -2025,7 +2051,14 @@ D.nhaCVA.forEach(function(b){
   }
 
   var mMai=new THREE.MeshLambertMaterial({color:b.mauMai, transparent:true});
-  if(texNgoi && b.phongCach!=='hien-dai'){
+  /* Ảnh ngói dán lên mái là ảnh TƯƠNG PHẢN RẤT CAO: đo ra 33% điểm ảnh
+     là mặt viên ngói (178,76,57), còn 40% là mạch vữa tối om (43,14,8).
+     Chính mảng tối ấy kéo cả mái xuống, nên nhìn từ xa mái ra màu nâu
+     sẫm chứ không ra đỏ gạch. Nhân sáng ảnh lên cho đúng màu gạch thì
+     39% điểm ảnh vượt ngưỡng, cháy trắng mất hoa văn.
+     Nên các dãy nhà trong trường nay dùng MÀU BẰNG, đúng màu gạch mẫu.
+     Muốn trả lại ảnh ngói thì bỏ "&& !b.maiPhang" ở dòng dưới. */
+  if(texNgoi && b.phongCach!=='hien-dai' && !b.maiPhang){
     mMai.map=texNgoi; mMai.color=new THREE.Color(0xFFFFFF);
   }
   var gMai, duoi;
@@ -2148,83 +2181,118 @@ function hinhCay(p){
 var nutPhu = [];   /* công trình nhỏ có bảng thông tin riêng: tượng, tháp */
 
 /* ── TƯỢNG CỤ CHU VĂN AN ───────────────────────────────────────────
-   Đặt giữa khoảng sân rộng phía nam dãy S, đúng chỗ khoanh trên ảnh.
-   Quanh chân tượng đã dọn quang một vòng — xem TUONG.donCay ở phần gieo
-   cây — nếu không thì mấy tán cổ thụ trồng dày ở bước trước che kín, kéo
-   camera xuống thấp cũng không thấy tượng đâu.
-   Dựng bằng khối xoay tròn chứ không phải người thật: ở cỡ sa bàn này
-   một hình bóng đúng dáng — áo thụng loe chân, tay chắp trước ngực, mũ
-   cánh chuồn — đọc ra rõ hơn hẳn một mô hình chi li mà bé tí.          */
+   Dựng lại theo ảnh chụp thực địa. Bản trước sai ba điểm cơ bản:
+     · cụ ĐỨNG, trong khi tượng thật là cụ NGỒI trên khối đá, chân
+       chống, một tay đặt lên gối;
+     · tượng đúc màu đồng, trong khi tượng thật tạc bằng đá xám;
+     · mặt tượng quay lung tung, nay xoay hẳn về phía cổng chính.
+   Bệ là khối đá chữ nhật cao, mặt trước khắc tên. Quanh sân có vành
+   cây cảnh cắt thấp, đúng như bồn cây ôm lấy bệ tượng trong ảnh.
+   Vẫn dựng bằng khối xoay tròn chứ không mô phỏng người thật: ở cỡ sa
+   bàn này một hình bóng đúng dáng đọc ra rõ hơn hẳn mô hình chi li. */
 var TUONG = { x:-21.0, z:13.0, huong:0.30, donCay:9.0 };
 (function dungTuong(){
+  /* quay mặt về cổng chính: hướng trước của tượng là (sin h, cos h) */
+  var gc=(D.cong||[]).filter(function(c){ return c.loai==='chinh'; })[0];
+  if(gc) TUONG.huong = Math.atan2(gc.x - TUONG.x, gc.z - TUONG.z);
+
   var G=new THREE.Group();
-  var mDa   = new THREE.MeshLambertMaterial({color:0xCFC7B4});  // bệ đá
-  var mDaSam= new THREE.MeshLambertMaterial({color:0xB3AA95});  // bậc dưới
-  var mDong = new THREE.MeshLambertMaterial({color:0x6E5A3A});  // tượng đồng
-  var mBien = new THREE.MeshLambertMaterial({color:0x3A3226});
+  var mDa   = new THREE.MeshLambertMaterial({color:0xC6C0B4});  // bệ đá
+  var mDaSam= new THREE.MeshLambertMaterial({color:0xADA695});  // bậc dưới
+  var mTuong= new THREE.MeshLambertMaterial({color:0xD3CEC4});  // đá tạc tượng
+  var mChu  = new THREE.MeshLambertMaterial({color:0x6E6558});
+  var mLa   = new THREE.MeshLambertMaterial({color:0x4E8A3A});
 
   function dat(o, y){ o.position.set(TUONG.x, y, TUONG.z);
     o.castShadow=true; o.receiveShadow=true; G.add(o); return o; }
 
-  /* sân lát quanh chân tượng, cho tách khỏi nền cỏ */
+  /* sân lát quanh chân tượng */
   var san=new THREE.Mesh(new THREE.CylinderGeometry(4.6,4.6,0.14,32),
     new THREE.MeshLambertMaterial({color:0xE2DCCB}));
   dat(san, 0.07);
-  var vien=new THREE.Mesh(new THREE.TorusGeometry(4.55,0.12,6,40), mDaSam);
-  vien.rotation.x=Math.PI/2; dat(vien, 0.16);
 
-  /* bệ ba bậc thu dần */
-  dat(new THREE.Mesh(new THREE.BoxGeometry(3.5,0.34,3.5), mDaSam), 0.31);
-  dat(new THREE.Mesh(new THREE.BoxGeometry(2.7,0.30,2.7), mDa),    0.63);
-  dat(new THREE.Mesh(new THREE.BoxGeometry(1.9,2.05,1.9), mDa),    1.80);
-  dat(new THREE.Mesh(new THREE.BoxGeometry(2.2,0.20,2.2), mDa),    2.92);
+  /* vành cây cảnh cắt thấp ôm lấy bệ */
+  var dsBui=[];
+  for(var i=0;i<26;i++){
+    var a=Math.PI*2*i/26;
+    var r=4.05 + (i%2)*0.10;
+    dsBui.push({g:new THREE.SphereGeometry(0.42,7,5),
+      p:[TUONG.x+Math.cos(a)*r, 0.34, TUONG.z+Math.sin(a)*r], s:1, sy:0.72});
+  }
+  var buiV=new THREE.Mesh(gop(dsBui), mLa);
+  buiV.castShadow=true; buiV.receiveShadow=true; G.add(buiV);
 
-  /* biển tên gắn mặt trước bệ */
-  var bien=new THREE.Mesh(new THREE.BoxGeometry(1.30,0.52,0.07), mBien);
-  bien.position.set(TUONG.x + Math.sin(TUONG.huong)*0.98, 1.85,
-                    TUONG.z + Math.cos(TUONG.huong)*0.98);
-  bien.rotation.y=TUONG.huong; bien.castShadow=true; G.add(bien);
+  /* bệ: bậc dưới, thân cao, mũ */
+  dat(new THREE.Mesh(new THREE.BoxGeometry(3.00,0.30,2.50), mDaSam), 0.29);
+  dat(new THREE.Mesh(new THREE.BoxGeometry(2.50,0.26,2.10), mDa),    0.57);
+  dat(new THREE.Mesh(new THREE.BoxGeometry(1.95,1.90,1.60), mDa),    1.65);
+  dat(new THREE.Mesh(new THREE.BoxGeometry(2.15,0.18,1.80), mDa),    2.69);
 
-  /* ── thân tượng ── */
+  /* tên khắc trên mặt trước bệ */
+  var sh=Math.sin(TUONG.huong), ch=Math.cos(TUONG.huong);
+  var bien=new THREE.Mesh(new THREE.BoxGeometry(1.45,0.34,0.06), mChu);
+  bien.position.set(TUONG.x + sh*0.82, 1.72, TUONG.z + ch*0.82);
+  bien.rotation.y=TUONG.huong; G.add(bien);
+
+  /* ── thân tượng: cụ ngồi ── */
   var T=new THREE.Group();
-  T.position.set(TUONG.x, 3.02, TUONG.z);
+  T.position.set(TUONG.x, 2.78, TUONG.z);
   T.rotation.y=TUONG.huong;
-  function t(o,y,x,z){ o.position.set(x||0,y,z||0);
+  function t(o,x,y,z){ o.position.set(x||0,y,z||0);
     o.castShadow=true; T.add(o); return o; }
 
-  /* áo thụng: loe rộng ở chân, thắt lại ở ngực */
-  t(new THREE.Mesh(new THREE.CylinderGeometry(0.60,0.86,1.70,18), mDong), 0.85);
-  t(new THREE.Mesh(new THREE.CylinderGeometry(0.50,0.60,0.80,18), mDong), 2.00);
-  /* tay áo buông hai bên, chắp lại phía trước */
+  /* khối đá làm chỗ ngồi, nhô cao phía sau lưng */
+  var da1=t(new THREE.Mesh(new THREE.BoxGeometry(1.55,0.95,1.05), mTuong), 0, 0.42, -0.30);
+  da1.rotation.y=0.10;
+  var da2=t(new THREE.Mesh(new THREE.BoxGeometry(1.15,1.30,0.55), mTuong), 0.05, 0.72, -0.62);
+  da2.rotation.y=-0.14;
+
+  /* đùi và gối đưa ra trước, phủ vạt áo */
+  var dui=t(new THREE.Mesh(new THREE.BoxGeometry(1.15,0.62,1.05), mTuong), 0, 1.10, 0.34);
+  dui.rotation.x=-0.12;
+  /* cẳng chân buông xuống trước bệ */
   [-1,1].forEach(function(s){
-    var ta=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.26,0.95,12), mDong);
-    ta.position.set(s*0.50, 1.95, 0.06); ta.rotation.z=-s*0.16;
-    ta.castShadow=true; T.add(ta);
+    var cg=new THREE.Mesh(new THREE.CylinderGeometry(0.20,0.17,0.92,10), mTuong);
+    cg.position.set(s*0.30, 0.50, 0.70); cg.rotation.x=0.10;
+    cg.castShadow=true; T.add(cg);
+    var ba=new THREE.Mesh(new THREE.BoxGeometry(0.30,0.16,0.44), mTuong);
+    ba.position.set(s*0.30, 0.08, 0.84); ba.castShadow=true; T.add(ba);
   });
-  t(new THREE.Mesh(new THREE.SphereGeometry(0.24,14,10), mDong), 1.92, 0, 0.34);
-  /* cổ áo và vai */
-  t(new THREE.Mesh(new THREE.CylinderGeometry(0.30,0.46,0.26,16), mDong), 2.50);
-  /* đầu */
-  var dau=t(new THREE.Mesh(new THREE.SphereGeometry(0.26,16,12), mDong), 2.86);
-  dau.scale.set(0.92,1.10,0.92);
-  /* mũ cánh chuồn: chỏm tròn, vành ngang, hai cánh xoè hai bên */
-  t(new THREE.Mesh(new THREE.CylinderGeometry(0.27,0.29,0.34,16), mDong), 3.20);
-  t(new THREE.Mesh(new THREE.CylinderGeometry(0.36,0.36,0.07,18), mDong), 3.02);
-  [-1,1].forEach(function(s){
-    var ca=new THREE.Mesh(new THREE.BoxGeometry(0.40,0.13,0.07), mDong);
-    ca.position.set(s*0.50, 3.18, -0.05); ca.rotation.z=s*0.12;
-    ca.castShadow=true; T.add(ca);
-  });
-  /* râu dài, nét nhận ra cụ đồ ngay từ xa */
-  var rau=new THREE.Mesh(new THREE.ConeGeometry(0.13,0.62,10), mDong);
-  rau.position.set(0,2.52,0.20); rau.rotation.x=Math.PI; rau.castShadow=true; T.add(rau);
+
+  /* thân trên: áo thụng loe, hơi ngả ra sau */
+  var than=t(new THREE.Mesh(new THREE.CylinderGeometry(0.44,0.62,1.16,14), mTuong), 0, 1.92, 0.06);
+  than.rotation.x=0.10;
+  /* vai */
+  t(new THREE.Mesh(new THREE.CylinderGeometry(0.40,0.46,0.26,14), mTuong), 0, 2.48, 0.02);
+
+  /* tay phải đặt lên gối, tay trái gấp trước bụng */
+  var tayP=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.20,0.98,10), mTuong);
+  tayP.position.set(0.44, 1.94, 0.34); tayP.rotation.set(0.62, 0, -0.16);
+  tayP.castShadow=true; T.add(tayP);
+  t(new THREE.Mesh(new THREE.SphereGeometry(0.17,10,8), mTuong), 0.40, 1.46, 0.66);
+  var tayT=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.19,0.78,10), mTuong);
+  tayT.position.set(-0.40, 2.02, 0.24); tayT.rotation.set(0.95, 0, 0.22);
+  tayT.castShadow=true; T.add(tayT);
+  t(new THREE.Mesh(new THREE.SphereGeometry(0.16,10,8), mTuong), -0.20, 1.76, 0.46);
+
+  /* cổ, đầu, búi tóc */
+  t(new THREE.Mesh(new THREE.CylinderGeometry(0.13,0.15,0.16,10), mTuong), 0, 2.66, 0.02);
+  var dau=t(new THREE.Mesh(new THREE.SphereGeometry(0.27,16,12), mTuong), 0, 2.95, 0.02);
+  dau.scale.set(0.90,1.12,0.96);
+  t(new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.19,0.22,12), mTuong), 0, 3.28, -0.02);
+  t(new THREE.Mesh(new THREE.SphereGeometry(0.12,10,8), mTuong), 0, 3.42, -0.02);
+
+  /* râu dài buông trước ngực — nét nhận ra cụ đồ ngay từ xa */
+  var rau=new THREE.Mesh(new THREE.ConeGeometry(0.15,0.78,10), mTuong);
+  rau.position.set(0, 2.50, 0.24); rau.rotation.x=Math.PI-0.10;
+  rau.castShadow=true; T.add(rau);
 
   G.add(T);
   scene.add(G);
-  nutPhu.push({G:G, tam:new THREE.Vector3(TUONG.x, 8.6, TUONG.z), d:{
+  nutPhu.push({G:G, tam:new THREE.Vector3(TUONG.x, 9.4, TUONG.z), d:{
     id:'tuong-chu-van-an', ten:'Tượng cụ Chu Văn An', laPhu:true,
     chacChan:'uoc', tuGD:5, nhom:'di-tich',
-    ghiChu:'Tượng đặt giữa khoảng sân phía nam dãy S. Cụ Chu Văn An là nhà giáo đời Trần, người mà trường mang tên từ năm 1945.'
+    ghiChu:'Tượng cụ Chu Văn An ngồi trên khối đá, tạc bằng đá xám, đặt giữa khoảng sân phía nam dãy S và quay mặt về phía cổng chính. Cụ là nhà giáo đời Trần, người mà trường mang tên từ năm 1945.'
   }});
 })();
 
@@ -2242,13 +2310,19 @@ var TUONG = { x:-21.0, z:13.0, huong:0.30, donCay:9.0 };
 var THAP = { x:70.0, z:17.0, huong:-0.30, donCay:8.0 };
 (function dungThap(){
   var G=new THREE.Group();
-  var mThan  = new THREE.MeshLambertMaterial({color:0xE0BE72});  // vôi vàng
+  var mThan  = new THREE.MeshLambertMaterial({color:M.truTuong});   // vôi vàng đã bạc
   var mTrang = new THREE.MeshLambertMaterial({color:0xF4EFE0});
-  var mMai   = new THREE.MeshLambertMaterial({color:0xA8402A});
+  var mMai   = new THREE.MeshLambertMaterial({color:0xC65334});   // cùng màu gạch với mái các dãy nhà
   var mSam   = new THREE.MeshLambertMaterial({color:0x2E2A22});
   var mKinh  = new THREE.MeshLambertMaterial({color:0xFAF7EE});
 
   var dsThan=[], dsTrang=[], dsMai=[], dsSam=[], dsKinh=[];
+  /* P() xoay điểm quanh trục đứng theo chiều LƯỢNG GIÁC trong mặt (x,z),
+     còn gop() lại xoay hình học bằng phép quay quanh +Y của three.js —
+     hai chiều NGƯỢC nhau. Bản trước cộng cùng một THAP.huong vào cả hai
+     nên vị trí lệch một góc, hướng lệch một góc nữa, cộng lại thành hai
+     lần: bốn mặt số không nằm giữa bốn bức tường của chúng. Nay ry mang
+     dấu âm để hai phép quay khớp nhau. */
   function P(dx,dz){
     var c=Math.cos(THAP.huong), s=Math.sin(THAP.huong);
     return [THAP.x + dx*c - dz*s, THAP.z + dx*s + dz*c];
@@ -2256,11 +2330,11 @@ var THAP = { x:70.0, z:17.0, huong:-0.30, donCay:8.0 };
   function hop(ds, w,h,d, dx,y,dz, xoayY){
     var p=P(dx,dz);
     ds.push({g:new THREE.BoxGeometry(w,h,d), p:[p[0],y,p[1]],
-             ry:THAP.huong + (xoayY||0)});
+             ry:-THAP.huong + (xoayY||0)});
   }
   function khoi(ds, geo, dx,y,dz, xoayY){
     var p=P(dx,dz);
-    ds.push({g:geo, p:[p[0],y,p[1]], ry:THAP.huong + (xoayY||0)});
+    ds.push({g:geo, p:[p[0],y,p[1]], ry:-THAP.huong + (xoayY||0)});
   }
 
   /* sân lát quanh chân tháp */
@@ -2304,20 +2378,26 @@ var THAP = { x:70.0, z:17.0, huong:-0.30, donCay:8.0 };
   gDia.rotateX(Math.PI/2);
   var gVanh  = new THREE.TorusGeometry(0.88,0.09,7,28);
   for(var q=0;q<4;q++){
+    /* Mặt số quay ĐÚNG RA NGOÀI bức tường nó gắn lên.
+       Đĩa dựng bằng hình trụ xoay 90° quanh X nên pháp tuyến của nó nằm
+       dọc trục Z. Muốn pháp tuyến ấy trỏ theo hướng (cos a, sin a) thì
+       phải xoay quanh trục đứng một góc π/2 − a, chứ không phải −a như
+       bản trước: −a làm cả bốn mặt số lệch đúng 90°, mỗi mặt đứng úp
+       vào bức tường bên cạnh thay vì bức tường của chính nó. */
     var a=Math.PI/2*q;                      // 0=+x, quay quanh trục đứng
+    var quayMat = Math.PI/2 - a;
     var cx=Math.cos(a)*1.30, cz=Math.sin(a)*1.30;
-    khoi(dsKinh,  gDia.clone(),  cx, yM, cz, -a);
-    khoi(dsTrang, gVanh.clone(), cx, yM, cz, -a);
+    khoi(dsKinh,  gDia.clone(),  cx, yM, cz, quayMat);
+    khoi(dsTrang, gVanh.clone(), cx, yM, cz, quayMat);
     /* mười hai vạch giờ */
     for(var k=0;k<12;k++){
       var b=Math.PI*2*k/12;
       var dai=(k%3===0)?0.20:0.11, r=0.72;
       var v=new THREE.BoxGeometry(0.055, dai, 0.05);
       v.rotateZ(-b);
+      v.translate(Math.sin(b)*r, Math.cos(b)*r, 0);
       var p=P(cx + Math.cos(a)*0.06, cz + Math.sin(a)*0.06);
-      dsSam.push({g:(function(gg){
-          gg.translate(Math.sin(b)*r, Math.cos(b)*r, 0); return gg; })(v),
-        p:[p[0], yM, p[1]], ry:THAP.huong - a});
+      dsSam.push({g:v, p:[p[0], yM, p[1]], ry:-THAP.huong + quayMat});
     }
     /* kim giờ và kim phút, đặt cố định ở 8 giờ 20 */
     [[0.44, 0.075, -Math.PI*2*(8/12 + 20/720)],
@@ -2326,7 +2406,7 @@ var THAP = { x:70.0, z:17.0, huong:-0.30, donCay:8.0 };
       g2.translate(0, kim[0]/2 - 0.06, 0);
       g2.rotateZ(kim[2]);
       var p=P(cx + Math.cos(a)*0.09, cz + Math.sin(a)*0.09);
-      dsSam.push({g:g2, p:[p[0], yM, p[1]], ry:THAP.huong - a});
+      dsSam.push({g:g2, p:[p[0], yM, p[1]], ry:-THAP.huong + quayMat});
     });
   }
 
@@ -2914,7 +2994,7 @@ function khoDich(vb){
       if(mAnh){
         xong();
         if(anhHopLe(mAnh[2])){
-          than.push('<img class="bvAnh" loading="lazy" alt="' + esc(mAnh[1]) +
+          than.push('<img class="bvAnh" alt="' + esc(mAnh[1]) +
             '" src="' + esc(mAnh[2]).replace(/"/g,'&quot;') + '">');
           if(mAnh[1]) than.push('<div class="cap">' + esc(mAnh[1]) + '</div>');
         }
@@ -2941,7 +3021,7 @@ function khoDichAnh(vb){
     var u=(p[0]||'').trim();
     if(!anhHopLe(u)) return '';
     var nam=(p[1]||'').trim(), ct=(p[2]||'').trim();
-    return '<img class="bvAnh" loading="lazy" alt="' + esc(ct) + '" src="' +
+    return '<img class="bvAnh" alt="' + esc(ct) + '" src="' +
       esc(u).replace(/"/g,'&quot;') + '">' +
       ((nam||ct) ? '<div class="cap">' + esc([nam,ct].filter(Boolean).join(' · ')) +
         '</div>' : '');
