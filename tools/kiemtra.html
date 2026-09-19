@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kiểm tra sa bàn</title>
+<style>
+  body{font:15px/1.55 system-ui,"Segoe UI",Roboto,sans-serif;max-width:880px;margin:32px auto;
+    padding:0 16px;color:#26241F;background:#F0F2EC}
+  h1{font-size:22px;margin:0 0 4px}
+  .phu{color:#7B7566;font-size:13.5px;margin:0 0 18px}
+  #kq{padding:16px 20px;border-radius:12px;background:#fff;box-shadow:0 1px 8px rgba(0,0,0,.12);
+    border-left:6px solid #A69E8D;margin:14px 0}
+  #kq.ok{border-left-color:#3E5C2E}
+  #kq.hong{border-left-color:#B3300F}
+  #kq b.lon{display:block;font-size:19px;margin-bottom:6px}
+  #kq ul{margin:8px 0 0;padding-left:20px}
+  #kq li{margin:4px 0;white-space:pre-wrap;word-break:break-word;font-size:13.5px}
+  button{font:inherit;font-weight:600;border:none;border-radius:8px;padding:9px 16px;cursor:pointer;
+    background:#3E5C2E;color:#fff;margin-right:8px}
+  button.phu2{background:#E4DFD3;color:#4C4739}
+  button:disabled{opacity:.5;cursor:default}
+  code{background:#E7E2D6;padding:1px 6px;border-radius:4px;font-size:13px}
+  /* app chạy ngoài màn hình ở khổ cố định để style tính toán không phụ thuộc cỡ cửa sổ */
+  #app{position:absolute;left:-10000px;top:0;width:1280px;height:800px;border:0}
+</style>
+</head>
+<body>
+<h1>Kiểm tra sa bàn</h1>
+<p class="phu">So bản đang chạy với mẫu <code>tools/mau.json</code>: dữ liệu, cảnh 3D theo từng mesh, nhãn và CSS.
+  Xem hướng dẫn ở <code>tools/README.md</code>.</p>
+
+<div id="kq">Đang nạp sa bàn…</div>
+<p>
+  <button id="bChay">Chạy lại</button>
+  <button id="bLuu" class="phu2" disabled>Lưu mẫu mới (.json)</button>
+</p>
+
+<iframe id="app" title="sa bàn"></iframe>
+
+<script src="kiemtra.js"></script>
+<script>
+(function(){
+  var fr = document.getElementById('app'), kq = document.getElementById('kq');
+  var bLuu = document.getElementById('bLuu'), bChay = document.getElementById('bChay');
+  var gan = null;                       // vân tay vừa chụp, để nút "Lưu mẫu mới" dùng
+
+  function hien(lop, tieuDe, dong){
+    kq.className = lop;
+    kq.innerHTML = '';
+    var b = document.createElement('b'); b.className = 'lon'; b.textContent = tieuDe; kq.appendChild(b);
+    if(dong && dong.length){
+      var ul = document.createElement('ul');
+      dong.forEach(function(t){ var li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+      kq.appendChild(ul);
+    }
+  }
+  function nap(){
+    return new Promise(function(res, rej){
+      var xong = false;
+      fr.onload = function(){ xong = true; res(fr.contentWindow); };
+      setTimeout(function(){ if(!xong) rej(new Error('Quá 30 giây mà sa bàn chưa nạp xong.')); }, 30000);
+      fr.src = '../index.html?debug&t=' + Date.now();     // t=… để khỏi dính cache
+    });
+  }
+
+  /* trả về {giong, khac, chiSo}; cũng vẽ lên trang */
+  function chay(){
+    bChay.disabled = true; bLuu.disabled = true;
+    hien('', 'Đang chạy…');
+    return nap().then(function(W){
+      var now = KiemTra.layVanTay(W);
+      gan = now;
+      bLuu.disabled = false;
+      return fetch('mau.json', {cache: 'no-store'}).then(function(r){
+        if(!r.ok) throw new Error('Chưa có tools/mau.json (HTTP ' + r.status + '). Bấm "Lưu mẫu mới" rồi đặt tệp vào tools/.');
+        return r.json();
+      }).then(function(mau){
+        var khac = KiemTra.soVoi(mau, now);
+        var chiSo = Object.keys(now.dulieu).length + now.hang.length + Object.keys(now.dom).length + 4;
+        if(!khac.length) hien('ok', '✓ Giống hệt mẫu',
+          [now.canh.mesh + ' mesh · ' + now.canh.tamGiac.toLocaleString('vi') + ' tam giác · ' +
+           Object.keys(now.dulieu).length + ' khoá dữ liệu · ' + now.dom.nhan + ' nhãn · ' +
+           now.css.tamLop[0] + ' luật CSS']);
+        else hien('hong', '✗ Có ' + khac.length + ' chỗ khác mẫu', khac);
+        return {giong: !khac.length, khac: khac, chiSo: chiSo};
+      });
+    }).catch(function(e){
+      hien('hong', '✗ Không chạy được', [String(e.message || e)]);
+      return {giong: false, khac: [String(e.message || e)], loi: true};
+    }).then(function(r){ bChay.disabled = false; return r; });
+  }
+
+  function luuMau(){
+    if(!gan) return;
+    var blob = new Blob([JSON.stringify(KiemTra.chuanHoaMau(gan))], {type: 'application/json'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'mau.json';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  bChay.onclick = chay; bLuu.onclick = luuMau;
+  /* cho phép điều khiển từ console hoặc công cụ tự động */
+  window.kiemTra = {chay: chay, luuMau: luuMau,
+    mauMoi: function(){ return gan ? JSON.stringify(KiemTra.chuanHoaMau(gan)) : null; }};
+  chay();
+})();
+</script>
+</body>
+</html>
