@@ -3011,5 +3011,9 @@ function khung(){
   });
   renderer.render(scene,camera);
 }
+/* Chỉ bật khi mở trang với ?debug: lộ cảnh 3D ra cho tools/kiemtra.html đo.
+   Bình thường không có gì thay đổi. */
+if(/[?&]debug(&|=|$)/.test(location.search))
+  window.SABAN_DEBUG = {scene:scene, camera:camera, meshCVA:meshCVA, nutPhu:nutPhu, nutCong:nutCong};
 ve(); khung();
 })();
